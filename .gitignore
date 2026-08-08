@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Database files
+*.db
+*.sqlite3
+
+# VS Code / IDE
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Streamlit
+*.log
+
+# Temp / session files
+.tmp/
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
