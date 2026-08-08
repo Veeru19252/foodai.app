@@ -20,6 +20,7 @@ import hashlib
 import sqlite3
 import time
 from datetime import datetime, timezone
+from typing import Optional
 
 import eta_service
 import explain_service
@@ -30,6 +31,14 @@ import streamlit as st
 import tracking
 from streamlit_autorefresh import st_autorefresh
 from streamlit_folium import st_folium
+
+st.set_page_config(
+    page_title="FoodAI",
+    page_icon="🍔",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 
 from database import (
     get_connection,
@@ -62,10 +71,11 @@ from database import (
     increment_promo_usage,
 )
 from seed_data import seed_all
+from ui import header_bar, inject_css, menu_row, page_header, restaurant_card, status_badge, status_stepper
 
 # ---------- helpers ----------
 
-def login(email: str, password: str) -> tuple | None:
+def login(email: str, password: str) -> Optional[tuple]:
     """Return the user row (id, name, email, password_hash, role) or None if invalid."""
     conn = get_connection()
     user = get_user_by_email(conn, email)
@@ -132,7 +142,7 @@ def _advance_order_status(
     return True
 
 
-def _assigned_driver_name(conn: sqlite3.Connection, order_id: int) -> str | None:
+def _assigned_driver_name(conn: sqlite3.Connection, order_id: int) -> Optional[str]:
     """Return the delivery driver's name for an order, or None if unassigned."""
     delivery = get_assigned_delivery_for_order(conn, order_id)
     if delivery is None:
@@ -145,47 +155,96 @@ def _assigned_driver_name(conn: sqlite3.Connection, order_id: int) -> str | None
 # ---------- pages ----------
 
 def show_login_page() -> None:
-    st.title("🍔 FoodAI")
-    st.subheader("Login to continue")
+    """Branded login: hero section, demo quick-login buttons, manual form."""
+    st.markdown(
+        page_header("FoodAI", "Fast, friendly food delivery with real-time tracking."),
+        unsafe_allow_html=True,
+    )
 
-    tab_login, tab_register = st.tabs(["Login", "Register"])
+    hero_col, login_col = st.columns([3, 2], gap="large")
 
-    with tab_login:
-        # Defaults read the registration prefill (set after a successful sign-up).
-        email = st.text_input(
-            "Email", value=st.session_state.get("reg_email", "customer@foodai.com")
+    with hero_col:
+        st.markdown(
+            '<div class="menu-card">'
+            '<div class="restaurant-badge">🍔</div>'
+            "<h3>Order food. Track the rider. Eat happy.</h3>"
+            "<p>Fresh meals from Bengaluru's favorite restaurants with live GPS "
+            "tracking and AI-predicted delivery times.</p>"
+            "</div>",
+            unsafe_allow_html=True,
         )
-        password = st.text_input(
-            "Password", type="password", value=st.session_state.get("reg_password", "")
-        )
-        if st.button("Login"):
-            user = login(email, password)
-            if user:
-                st.session_state["user"] = user
-                st.rerun()
-            else:
-                st.error(
-                    "Invalid email or password. Try customer@foodai.com / password123"
-                )
 
-    with tab_register:
-        reg_name = st.text_input("Name")
-        reg_email = st.text_input("Email")
-        reg_password = st.text_input("Password", type="password")
-        if st.button("Register"):
-            conn = get_connection()
-            ok, message = register_user(conn, reg_name, reg_email, reg_password)
-            conn.close()
-            if ok:
-                st.session_state["reg_email"] = reg_email
-                st.session_state["reg_password"] = reg_password
-                st.success(message)
-            else:
-                st.error(message)
+    with login_col:
+        tab_login, tab_register = st.tabs(["Login", "Register"])
+
+        with tab_login:
+            st.markdown('<div class="order-card">', unsafe_allow_html=True)
+            st.markdown("<h3>Welcome back</h3>", unsafe_allow_html=True)
+
+            demo_accounts = [
+                ("quick_customer", "Demo Customer", "customer@foodai.com"),
+                ("quick_spice", "Spice Garden Owner", "spice@foodai.com"),
+                ("quick_rider", "Rider Ram", "rider@foodai.com"),
+            ]
+            for key, label, email in demo_accounts:
+                if st.button(f"👤 {label} — {email}", key=key):
+                    user = login(email, "password123")
+                    if user:
+                        st.session_state["user"] = user
+                        st.rerun()
+                    else:
+                        st.error(f"Could not sign in as {label}. Please try again.")
+
+            st.divider()
+            st.markdown("<h3>Sign in with email</h3>", unsafe_allow_html=True)
+            # Defaults read the registration prefill (set after a successful sign-up).
+            email = st.text_input(
+                "Email",
+                key="login_email",
+                value=st.session_state.get("reg_email", "customer@foodai.com"),
+            )
+            password = st.text_input(
+                "Password",
+                type="password",
+                key="login_password",
+                value=st.session_state.get("reg_password", ""),
+            )
+            if st.button("Login"):
+                user = login(email, password)
+                if user:
+                    st.session_state["user"] = user
+                    st.rerun()
+                else:
+                    st.error(
+                        "Invalid email or password. Try customer@foodai.com / password123"
+                    )
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        with tab_register:
+            reg_name = st.text_input("Name", key="register_name")
+            reg_email = st.text_input("Email", key="register_email")
+            reg_password = st.text_input("Password", type="password", key="register_password")
+            if st.button("Register"):
+                conn = get_connection()
+                ok, message = register_user(conn, reg_name, reg_email, reg_password)
+                conn.close()
+                if ok:
+                    st.session_state["reg_email"] = reg_email
+                    st.session_state["reg_password"] = reg_password
+                    st.success(message)
+                else:
+                    st.error(message)
 
 
 def show_restaurant_listing() -> None:
-    st.title("🍔 Restaurants near you")
+    """Customer page: browse restaurants by cuisine and add meals to the cart."""
+    st.markdown(
+        page_header(
+            "Restaurants",
+            "Browse nearby favorites and add meals to your cart.",
+        ),
+        unsafe_allow_html=True,
+    )
 
     conn = get_connection()
     restaurants = get_restaurants(conn)
@@ -195,122 +254,174 @@ def show_restaurant_listing() -> None:
     chosen = st.selectbox("Filter by cuisine", ["All"] + cuisines)
     filtered = [r for r in restaurants if chosen == "All" or r[2] == chosen]
 
+    # Responsive card grid (styled by .foodai-card-grid): 1 column on mobile,
+    # 2 on tablet, 3 on desktop. Each restaurant lives in its own container so
+    # it becomes one grid cell with the card + menu + add buttons inside.
+    st.markdown('<div class="foodai-card-grid">', unsafe_allow_html=True)
     for rest_id, name, cuisine, rating, address in filtered:
-        with st.expander(f"{name} ⭐ {rating} — {cuisine}"):
-            st.write(f"📍 {address}")
+        with st.container():
+            st.markdown(
+                restaurant_card(name, cuisine, rating, address),
+                unsafe_allow_html=True,
+            )
 
             conn = get_connection()
             menu = get_menu(conn, rest_id)
             conn.close()
 
-            cols = st.columns([3, 1, 1, 1])
             for item_id, item_name, price, prep in menu:
-                cols[0].write(f"**{item_name}** — ₹{price:.0f} (prep {prep} min)")
-                if cols[3].button("➕", key=f"add_{item_id}"):
+                st.markdown(
+                    menu_row(item_name, price, prep),
+                    unsafe_allow_html=True,
+                )
+                if st.button("Add to cart", key=f"add_{item_id}"):
                     add_to_cart(item_id, item_name, price)
                     st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def show_cart_page(user) -> None:
-    st.title("🛒 Your Cart")
+    st.markdown(
+        page_header(
+            "Cart",
+            "Your selected meals are ready to go. Confirm the address and place your order.",
+        ),
+        unsafe_allow_html=True,
+    )
 
     cart = st.session_state["cart"]
     if not cart:
         st.info("Cart is empty. Add items from the Restaurant page.")
         return
 
-    for item_id, item in cart.items():
-        cols = st.columns([3, 1, 1])
-        cols[0].write(f"{item['name']} × {item['quantity']}")
-        cols[1].write(f"₹{item['price'] * item['quantity']:.0f}")
-        if cols[2].button("Remove", key=f"rm_{item_id}"):
-            del st.session_state["cart"][item_id]
-            st.rerun()
+    with st.container():
+        st.markdown('<div class="order-card">', unsafe_allow_html=True)
+        for item_id, item in cart.items():
+            cols = st.columns([3, 1, 1])
+            cols[0].write(f"**{item['name']} × {item['quantity']}**")
+            cols[1].write(f"₹{item['price'] * item['quantity']:.0f}")
+            if cols[2].button("Remove", key=f"rm_{item_id}"):
+                del st.session_state["cart"][item_id]
+                st.rerun()
 
-    st.divider()
+        # Bill summary: per-item subtotals + order total in a styled block.
+        # Local import keeps the change scoped to this page (see task constraints).
+        from html import escape
 
-    subtotal = cart_total(cart)
-    promo = st.session_state.get("promo")
-    # Recompute the discount against the current subtotal so a stale session
-    # value can never exceed the subtotal (e.g. the cart changed after the
-    # promo was applied). calculate_discount enforces this in database.py;
-    # we clamp defensively here too.
-    discount = min(float(promo["discount"]), subtotal) if promo else 0.0
+        subtotal_rows = "".join(
+            (
+                '<div style="display:flex;justify-content:space-between;'
+                'align-items:center;padding:0.35rem 0;color:var(--foodai-text);">'
+                f'<span style="font-weight:600;">{escape(item["name"])} × {item["quantity"]}</span>'
+                f'<span>₹{item["price"] * item["quantity"]:.0f}</span>'
+                "</div>"
+            )
+            for item in cart.values()
+        )
+        st.markdown(
+            (
+                '<div style="background:var(--foodai-primary-softer);'
+                'border:1px solid var(--foodai-border);'
+                'border-radius:var(--foodai-radius-md);'
+                'padding:1rem 1.25rem;margin-top:1.25rem;">'
+                '<div style="font-weight:700;color:var(--foodai-text);margin-bottom:0.4rem;">'
+                "Bill Summary</div>"
+                + subtotal_rows
+                + '<div style="display:flex;justify-content:space-between;align-items:center;'
+                'border-top:1px solid var(--foodai-border);margin-top:0.4rem;padding-top:0.7rem;'
+                'font-weight:800;color:var(--foodai-primary-dark);font-size:1.1rem;">'
+                f'<span>Total</span><span>₹{cart_total(cart):.0f}</span></div>'
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
 
-    st.write(f"**Subtotal: ₹{subtotal:.0f}**")
+        st.divider()
 
-    if promo is None:
-        with st.expander("Apply promo code"):
-            promo_code = st.text_input("Promo code", key="promo_input")
-            if st.button("Apply", key="apply_promo_btn"):
-                code = promo_code.strip()
-                conn = get_connection()
-                ok, message, new_discount = apply_promo(conn, code, subtotal)
-                if ok:
-                    promo_row = get_promo_by_code(conn, code)
-                    conn.close()
-                    clamped = min(new_discount, subtotal)
-                    st.session_state["promo"] = {
-                        "code": code,
-                        "discount": clamped,
-                        "promo_id": promo_row["id"] if promo_row else None,
-                    }
-                    st.success(f"{message} You save ₹{clamped:.2f}!")
-                    st.rerun()
-                else:
-                    conn.close()
-                    st.session_state.pop("promo", None)
-                    st.error(message)
-    else:
-        st.write(f"**Promo discount ({promo['code']}): -₹{discount:.0f}**")
-        st.write(f"**Final total: ₹{subtotal - discount:.0f}**")
-        if st.button("Remove promo", key="remove_promo_btn"):
+        subtotal = cart_total(cart)
+        promo = st.session_state.get("promo")
+        # Recompute the discount against the current subtotal so a stale session
+        # value can never exceed the subtotal (e.g. the cart changed after the
+        # promo was applied). calculate_discount enforces this in database.py;
+        # we clamp defensively here too.
+        discount = min(float(promo["discount"]), subtotal) if promo else 0.0
+
+        st.write(f"**Subtotal: ₹{subtotal:.0f}**")
+
+        if promo is None:
+            with st.expander("Apply promo code"):
+                promo_code = st.text_input("Promo code", key="promo_input")
+                if st.button("Apply", key="apply_promo_btn"):
+                    code = promo_code.strip()
+                    conn = get_connection()
+                    ok, message, new_discount = apply_promo(conn, code, subtotal)
+                    if ok:
+                        promo_row = get_promo_by_code(conn, code)
+                        conn.close()
+                        clamped = min(new_discount, subtotal)
+                        st.session_state["promo"] = {
+                            "code": code,
+                            "discount": clamped,
+                            "promo_id": promo_row["id"] if promo_row else None,
+                        }
+                        st.success(f"{message} You save ₹{clamped:.2f}!")
+                        st.rerun()
+                    else:
+                        conn.close()
+                        st.session_state.pop("promo", None)
+                        st.error(message)
+        else:
+            st.write(f"**Promo discount ({promo['code']}): -₹{discount:.0f}**")
+            st.write(f"**Final total: ₹{subtotal - discount:.0f}**")
+            if st.button("Remove promo", key="remove_promo_btn"):
+                st.session_state.pop("promo", None)
+                st.rerun()
+
+        st.subheader("Delivery address")
+        address = st.text_input("Address", value="Hostel Block C, MG Road")
+
+        if st.button("Place Order"):
+            # Find this customer's restaurant (all items belong to one cart, so we
+            # use the first item's restaurant). For a starter, we look it up by
+            # finding the menu item's restaurant.
+            restaurant_id = _find_cart_restaurant(cart)
+            if restaurant_id is None:
+                st.error("Could not identify restaurant for cart items.")
+                return
+
+            items = [
+                (item_id, item["quantity"], item["price"])
+                for item_id, item in cart.items()
+            ]
+            conn = get_connection()
+            if promo is not None:
+                # Clamp the stored discount against the current subtotal so it can
+                # never exceed what the customer actually pays.
+                order_discount = min(float(promo["discount"]), cart_total(cart))
+                order_id = create_order(
+                    conn,
+                    user[0],
+                    restaurant_id,
+                    items,
+                    coupon_code=promo["code"],
+                    discount_amount=order_discount,
+                )
+                # Usage is counted only after the order is actually created.
+                if promo.get("promo_id") is not None:
+                    increment_promo_usage(conn, promo["promo_id"])
+            else:
+                order_id = create_order(conn, user[0], restaurant_id, items)
+            conn.close()
+
+            st.success(f"✅ Order #{order_id} placed! Status: PLACED")
+            st.session_state["cart"] = {}
             st.session_state.pop("promo", None)
             st.rerun()
 
-    st.subheader("Delivery address")
-    address = st.text_input("Address", value="Hostel Block C, MG Road")
-
-    if st.button("Place Order"):
-        # Find this customer's restaurant (all items belong to one cart, so we
-        # use the first item's restaurant). For a starter, we look it up by
-        # finding the menu item's restaurant.
-        restaurant_id = _find_cart_restaurant(cart)
-        if restaurant_id is None:
-            st.error("Could not identify restaurant for cart items.")
-            return
-
-        items = [
-            (item_id, item["quantity"], item["price"])
-            for item_id, item in cart.items()
-        ]
-        conn = get_connection()
-        if promo is not None:
-            # Clamp the stored discount against the current subtotal so it can
-            # never exceed what the customer actually pays.
-            order_discount = min(float(promo["discount"]), cart_total(cart))
-            order_id = create_order(
-                conn,
-                user[0],
-                restaurant_id,
-                items,
-                coupon_code=promo["code"],
-                discount_amount=order_discount,
-            )
-            # Usage is counted only after the order is actually created.
-            if promo.get("promo_id") is not None:
-                increment_promo_usage(conn, promo["promo_id"])
-        else:
-            order_id = create_order(conn, user[0], restaurant_id, items)
-        conn.close()
-
-        st.success(f"✅ Order #{order_id} placed! Status: PLACED")
-        st.session_state["cart"] = {}
-        st.session_state.pop("promo", None)
-        st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
-def _find_cart_restaurant(cart: dict) -> int | None:
+def _find_cart_restaurant(cart: dict) -> Optional[int]:
     """Find the restaurant id for the first cart item (simple starter logic)."""
     conn = get_connection()
     first_item_id = next(iter(cart), None)
@@ -327,7 +438,13 @@ def _find_cart_restaurant(cart: dict) -> int | None:
 
 def show_order_history(user) -> None:
     """Customer page: list past orders with their items."""
-    st.title("🧾 My Orders")
+    st.markdown(
+        page_header(
+            "Order History",
+            "Review past deliveries and order details in a clean activity feed.",
+        ),
+        unsafe_allow_html=True,
+    )
 
     conn = get_connection()
     orders = get_orders_for_customer(conn, user[0])
@@ -338,19 +455,28 @@ def show_order_history(user) -> None:
         return
 
     for order_id, restaurant_name, status, total, created_at in orders:
-        with st.expander(f"Order #{order_id} — {restaurant_name} ({created_at})"):
-            st.write(f"**Status:** {status}")
-            conn = get_connection()
-            items = get_order_items(conn, order_id)
-            conn.close()
-            for name, quantity, price in items:
-                st.write(f"- {name} × {quantity} — ₹{price * quantity:.0f}")
-            st.write(f"**Total: ₹{total:.0f}**")
+        st.markdown('<div class="order-card">', unsafe_allow_html=True)
+        st.write(f"### Order #{order_id} — {restaurant_name}")
+        st.markdown(status_badge(status), unsafe_allow_html=True)
+        st.write(f"**Placed:** {created_at}")
+        conn = get_connection()
+        items = get_order_items(conn, order_id)
+        conn.close()
+        for name, quantity, price in items:
+            st.write(f"- {name} × {quantity} — ₹{price * quantity:.0f}")
+        st.write(f"**Total: ₹{total:.0f}**")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def show_restaurant_panel(user) -> None:
     """Restaurant owner page: see incoming orders and update their status."""
-    st.title("🏪 Restaurant Panel")
+    st.markdown(
+        page_header(
+            "Restaurant Panel",
+            "Manage incoming orders, update status, and keep customers informed.",
+        ),
+        unsafe_allow_html=True,
+    )
 
     conn = get_connection()
     orders = get_orders_for_restaurant(conn, user[0])
@@ -363,37 +489,49 @@ def show_restaurant_panel(user) -> None:
     status_flow = ["PLACED", "CONFIRMED", "PREPARING", "OUT_FOR_DELIVERY", "DELIVERED"]
 
     for order_id, customer_name, status, total, created_at in orders:
-        with st.expander(f"Order #{order_id} — {customer_name} (₹{total:.0f})"):
-            st.write(f"**Status:** {status}")
+        st.markdown('<div class="order-card">', unsafe_allow_html=True)
+        st.write(f"### Order #{order_id} — {customer_name}")
+        st.write(f"**Status:** {status}")
+        st.write(f"**Placed:** {created_at}")
+        st.write(f"**Total:** ₹{total:.0f}")
+        conn = get_connection()
+        items = get_order_items(conn, order_id)
+        conn.close()
+        for name, quantity, price in items:
+            st.write(f"- {name} × {quantity} — ₹{price * quantity:.0f}")
+
+        st.markdown(status_stepper(status_flow, status), unsafe_allow_html=True)
+
+        if status in ("OUT_FOR_DELIVERY", "DELIVERED"):
             conn = get_connection()
-            items = get_order_items(conn, order_id)
+            driver_name = _assigned_driver_name(conn, order_id)
             conn.close()
-            for name, quantity, price in items:
-                st.write(f"- {name} × {quantity} — ₹{price * quantity:.0f}")
+            if driver_name is not None:
+                st.write(f"👤 Driver: {driver_name}")
 
-            if status in ("OUT_FOR_DELIVERY", "DELIVERED"):
+        current_index = status_flow.index(status)
+        if current_index < len(status_flow) - 1:
+            next_status = status_flow[current_index + 1]
+            if st.button(f"Advance to {next_status}", key=f"adv_{order_id}"):
                 conn = get_connection()
-                driver_name = _assigned_driver_name(conn, order_id)
+                advanced = _advance_order_status(conn, order_id, next_status)
                 conn.close()
-                if driver_name is not None:
-                    st.write(f"👤 Driver: {driver_name}")
-
-            current_index = status_flow.index(status)
-            if current_index < len(status_flow) - 1:
-                next_status = status_flow[current_index + 1]
-                if st.button(f"Advance to {next_status}", key=f"adv_{order_id}"):
-                    conn = get_connection()
-                    advanced = _advance_order_status(conn, order_id, next_status)
-                    conn.close()
-                    if not advanced:
-                        st.warning("No delivery partners available right now.")
-                    else:
-                        st.rerun()
+                if not advanced:
+                    st.warning("No delivery partners available right now.")
+                else:
+                    st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def show_delivery_panel(user) -> None:
     """Delivery partner page: pick up, track, and complete assigned deliveries."""
-    st.title("🛵 Delivery Panel")
+    st.markdown(
+        page_header(
+            "Delivery Partner",
+            "Track your current route, start pickups, and complete orders with clear ETA feedback.",
+        ),
+        unsafe_allow_html=True,
+    )
 
     # Auto-refresh every 2.5s so the map + ETA move without user interaction.
     # Must be called at most once per page — it lives only on this panel.
@@ -434,6 +572,8 @@ def show_delivery_panel(user) -> None:
     end = tracking.customer_home_coordinates()
     route = tracking.build_route(start, end)
 
+    # Route card: restaurant -> customer, wrapping the live delivery flow.
+    st.markdown('<div class="order-card">', unsafe_allow_html=True)
     st.write(f"**{restaurant_name}** → **{customer_name}**")
 
     # Not picked up yet: show the start button and stop.
@@ -445,6 +585,7 @@ def show_delivery_panel(user) -> None:
             log_trip_position(conn, delivery_id, *start)
             conn.close()
             st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
         return
 
     # Picked up: progress is elapsed time over the full trip estimate.
@@ -482,6 +623,9 @@ def show_delivery_panel(user) -> None:
     st.metric("Estimated arrival", tracking.format_eta(eta_min))
     st.caption("AI-predicted ETA" if eta_source == "ml" else "Estimated ETA")
 
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="menu-card">', unsafe_allow_html=True)
     m = folium.Map(location=start, zoom_start=13)
     folium.PolyLine(route, color="blue", weight=3).add_to(m)
     folium.Marker(
@@ -514,11 +658,18 @@ def show_delivery_panel(user) -> None:
         height=450,
         returned_objects=[],
     )
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def show_customer_tracking(user) -> None:
     """Customer page: live map + ETA for the most recent out-for-delivery order."""
-    st.title("🛵 Track Delivery")
+    st.markdown(
+        page_header(
+            "Track Delivery",
+            "See your order’s progress on the map and get an updated ETA without refreshing.",
+        ),
+        unsafe_allow_html=True,
+    )
 
     conn = get_connection()
     orders = get_orders_for_customer(conn, user[0])
@@ -570,6 +721,10 @@ def show_customer_tracking(user) -> None:
 
     st.write(f"**{restaurant_name}** — Status: **{status}**")
 
+    # Order progress timeline: PLACED -> CONFIRMED -> PREPARING -> OUT_FOR_DELIVERY -> DELIVERED.
+    status_flow = ["PLACED", "CONFIRMED", "PREPARING", "OUT_FOR_DELIVERY", "DELIVERED"]
+    st.markdown(status_stepper(status_flow, status), unsafe_allow_html=True)
+
     m = folium.Map(location=tracking.BENGALURU_CENTER, zoom_start=13)
     folium.PolyLine(route, color="blue", weight=3).add_to(m)
     folium.Marker(
@@ -595,6 +750,7 @@ def show_customer_tracking(user) -> None:
     lngs = [point[1] for point in route]
     m.fit_bounds([[min(lats), min(lngs)], [max(lats), max(lngs)]], padding=(20, 20))
     # returned_objects=[] keeps the map read-only (no click-driven reruns).
+    st.markdown('<div class="menu-card">', unsafe_allow_html=True)
     st_folium(
         m,
         key=f"customer_tracking_map_{order_id}",
@@ -602,6 +758,7 @@ def show_customer_tracking(user) -> None:
         height=450,
         returned_objects=[],
     )
+    st.markdown('</div>', unsafe_allow_html=True)
 
     if status == "DELIVERED":
         st.success("Your order was delivered! 🎉")
@@ -866,6 +1023,32 @@ def show_admin_dashboard() -> None:
 
 # ---------- main ----------
 
+_NAV_OPTIONS = {
+    "restaurant": ["Restaurant Panel", "Logout"],
+    "delivery": ["Delivery Panel", "Logout"],
+    "customer": ["Restaurants", "Cart", "Track Delivery", "My Orders", "Logout"],
+    "admin": ["Admin Dashboard", "Logout"],
+}
+
+
+def _nav_options_for_role(role: str) -> list:
+    """Return the navigation options for a user role (customer is the default)."""
+    return _NAV_OPTIONS.get(role, _NAV_OPTIONS["customer"])
+
+
+def _render_header_bar(user: tuple) -> None:
+    """Render the branded top bar with the user chip and cart count."""
+    st.markdown(
+        header_bar(
+            logo_text="🍔 FoodAI",
+            user_name=user[1],
+            role=user[4],
+            cart_count=len(st.session_state.get("cart", {})),
+        ),
+        unsafe_allow_html=True,
+    )
+
+
 def main() -> None:
     # One-time setup: create tables + seed demo data on first run.
     if "initialized" not in st.session_state:
@@ -878,39 +1061,47 @@ def main() -> None:
     if "cart" not in st.session_state:
         st.session_state["cart"] = {}
 
+    # One-time CSS injection (design system from ui.theme).
+    if "css_injected" not in st.session_state:
+        inject_css()
+        st.session_state["css_injected"] = True
+
     # Login gate.
     if "user" not in st.session_state:
         show_login_page()
         return
 
     user = st.session_state["user"]
-    st.sidebar.write(f"👤 {user[1]} ({user[4]})")
+    _render_header_bar(user)
 
-    # Role-based navigation.
+    # Role-based navigation: horizontal pill radio in the main area.
+    page = st.radio(
+        "Navigate",
+        _nav_options_for_role(user[4]),
+        horizontal=True,
+        label_visibility="collapsed",
+        key="main_nav_" + user[4],
+    )
+
     if user[4] == "restaurant":
-        page = st.sidebar.radio("Navigate", ["Restaurant Panel", "Logout"])
         if page == "Restaurant Panel":
             show_restaurant_panel(user)
         else:
             st.session_state.pop("user", None)
             st.rerun()
     elif user[4] == "delivery":
-        page = st.sidebar.radio("Navigate", ["Delivery Panel", "Logout"])
         if page == "Delivery Panel":
             show_delivery_panel(user)
         else:
             st.session_state.pop("user", None)
             st.rerun()
     elif user[4] == "admin":
-        page = st.sidebar.radio("Navigate", ["Admin Dashboard", "Logout"])
         if page == "Admin Dashboard":
             show_admin_dashboard()
         else:
             st.session_state.pop("user", None)
             st.rerun()
     else:
-        page = st.sidebar.radio("Navigate", ["Restaurants", "Cart", "Track Delivery", "My Orders", "Logout"])
-
         if page == "Restaurants":
             show_restaurant_listing()
         elif page == "Cart":

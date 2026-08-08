@@ -32,11 +32,14 @@ from __future__ import annotations
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-import joblib
+from typing import TYPE_CHECKING, Optional
 
 import tracking
+
+try:
+    import joblib
+except ModuleNotFoundError:
+    joblib = None  # type: ignore
 
 if TYPE_CHECKING:
     from xgboost import XGBRegressor
@@ -86,12 +89,15 @@ ZONE_ANCHORS = {
 
 
 @lru_cache(maxsize=1)
-def load_model() -> XGBRegressor | None:
+def load_model() -> Optional[XGBRegressor]:
     """Load and cache the trained ETA model, or None if the file is missing.
 
     The result is cached, so the absence warning is printed at most once.
     Safe to call repeatedly: ``predict_eta`` and ``best_eta`` both use it.
     """
+    if joblib is None:
+        print("eta_service: joblib not installed — using formula fallback")
+        return None
     if not MODEL_PATH.exists():
         print(
             "eta_service: models/eta_model.joblib not found — using formula fallback"
@@ -145,7 +151,7 @@ def features_for_order(
     }
 
 
-def predict_eta(features: dict) -> float | None:
+def predict_eta(features: dict) -> Optional[float]:
     """Predict delivery minutes from order features, or None without a model.
 
     Expected keys: ``distance_km``, ``prep_time_min``, ``hour``,

@@ -161,7 +161,10 @@ def get_menu(conn: sqlite3.Connection, restaurant_id: int) -> list[tuple]:
     return cur.fetchall()
 
 
-def get_user_by_email(conn: sqlite3.Connection, email: str) -> tuple | None:
+from typing import Optional
+
+
+def get_user_by_email(conn: sqlite3.Connection, email: str) -> Optional[tuple]:
     """Return one user row (id, name, email, password_hash, role) or None."""
     cur = conn.execute(
         "SELECT id, name, email, password_hash, role FROM users WHERE email = ?",
@@ -191,7 +194,7 @@ def create_order(
     customer_id: int,
     restaurant_id: int,
     items: list[tuple[int, int, float]],  # [(menu_item_id, quantity, price)]
-    coupon_code: str | None = None,
+    coupon_code: Optional[str] = None,
     discount_amount: float = 0.0,
 ) -> int:
     """Create an order with its items. Returns the new order id.
@@ -294,7 +297,7 @@ def assign_delivery(conn: sqlite3.Connection, order_id: int, driver_id: int) -> 
     return cur.lastrowid
 
 
-def get_assigned_delivery_for_order(conn: sqlite3.Connection, order_id: int) -> tuple | None:
+def get_assigned_delivery_for_order(conn: sqlite3.Connection, order_id: int) -> Optional[tuple]:
     """Return the delivery row for an order:
     (id, driver_id, pickup_time, delivered_time) or None."""
     cur = conn.execute(
@@ -319,7 +322,7 @@ def log_trip_position(
     conn.commit()
 
 
-def get_latest_trip_position(conn: sqlite3.Connection, delivery_id: int) -> tuple | None:
+def get_latest_trip_position(conn: sqlite3.Connection, delivery_id: int) -> Optional[tuple]:
     """Return the most recent trip position for a delivery:
     (lat, lng, timestamp) or None."""
     cur = conn.execute(
@@ -380,7 +383,7 @@ def complete_delivery(conn: sqlite3.Connection, delivery_id: int) -> None:
     conn.commit()
 
 
-def find_active_delivery_for_order(conn: sqlite3.Connection, order_id: int) -> tuple | None:
+def find_active_delivery_for_order(conn: sqlite3.Connection, order_id: int) -> Optional[tuple]:
     """Return the active (not yet delivered) delivery row for an order:
     (id, order_id, driver_id, pickup_time, delivered_time) or None."""
     cur = conn.execute(
@@ -563,7 +566,7 @@ def get_promo_codes(conn: sqlite3.Connection) -> list[dict]:
     return [dict(zip(columns, row)) for row in cur.fetchall()]
 
 
-def get_promo_by_code(conn: sqlite3.Connection, code: str) -> dict | None:
+def get_promo_by_code(conn: sqlite3.Connection, code: str) -> Optional[dict]:
     """Return one promo code (case-insensitive match) keyed by column name, or None."""
     cur = conn.execute(
         "SELECT * FROM promo_codes WHERE code = ? COLLATE NOCASE",
@@ -578,7 +581,7 @@ def get_promo_by_code(conn: sqlite3.Connection, code: str) -> dict | None:
 
 def validate_promo_code(
     conn: sqlite3.Connection, code: str, order_total: float
-) -> tuple[bool, str, dict | None]:
+) -> tuple[bool, str, Optional[dict]]:
     """Validate a promo code for an order total.
 
     Checks in order: exists, active, not expired, meets minimum order,
