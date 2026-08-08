@@ -326,3 +326,162 @@ def find_active_delivery_for_order(conn: sqlite3.Connection, order_id: int) -> t
         (order_id,),
     )
     return cur.fetchone()
+
+
+# ---- Admin analytics helpers ----
+
+def get_revenue_totals(conn: sqlite3.Connection) -> dict:
+    """Return revenue from DELIVERED orders:
+    {"today": float, "total": float}; today = UTC calendar day.
+    Empty DB -> {"today": 0.0, "total": 0.0}."""
+    cur = conn.execute(
+        """
+        SELECT
+            COALESCE(
+                SUM(CASE WHEN date(created_at) = date('now') THEN total END),
+                0.0
+            ) AS today_revenue,
+            COALESCE(SUM(total), 0.0) AS total_revenue
+        FROM orders
+        WHERE status = 'DELIVERED'
+        """
+    )
+    row = cur.fetchone()
+    return {"today": row[0], "total": row[1]}
+
+
+def get_order_stats(conn: sqlite3.Connection) -> dict:
+    """Return order counts by lifecycle bucket:
+    {"total_orders": int, "delivered": int, "active": int, "cancelled": int}.
+    Empty DB -> all 0."""
+    cur = conn.execute(
+        """
+        SELECT
+            COUNT(*) AS total_orders,
+            COALESCE(SUM(CASE WHEN status = 'DELIVERED' THEN 1 END), 0) AS delivered,
+            COALESCE(
+                SUM(CASE WHEN status IN ('PLACED', 'CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY') THEN 1 END),
+                0
+            ) AS active,
+            COALESCE(SUM(CASE WHEN status = 'CANCELLED' THEN 1 END), 0) AS cancelled
+        FROM orders
+        """
+    )
+    row = cur.fetchone()
+    return {
+        "total_orders": row[0],
+        "delivered": row[1],
+        "active": row[2],
+        "cancelled": row[3],
+    }
+
+
+def get_orders_per_day(conn: sqlite3.Connection, limit_days: int = 7) -> list[dict]:
+    """Return order volume for the last limit_days (UTC):
+    [{"day": str, "count": int, "revenue": float}] oldest first;
+    count = orders placed that day, revenue = DELIVERED total that day.
+    Empty DB -> []."""
+    cur = conn.execute(
+        """
+        SELECT
+            date(created_at) AS day,
+            COUNT(*) AS count,
+            COALESCE(
+                SUM(CASE WHEN status = 'DELIVERED' THEN total END),
+                0.0
+            ) AS revenue
+        FROM orders
+        WHERE created_at >= datetime('now', '-' || ? || ' days')
+        GROUP BY date(created_at)
+        ORDER BY day ASC
+        """,
+        (limit_days,),
+    )
+    return [
+        {"day": row[0], "count": row[1], "revenue": row[2]}
+        for row in cur.fetchall()
+    ]
+
+
+def get_orders_per_restaurant(conn: sqlite3.Connection) -> list[dict]:
+    """Return order volume per restaurant (restaurants with no orders are omitted):
+    [{"restaurant_name": str, "count": int, "revenue": float}]
+    ordered by revenue DESC, count DESC, name ASC. Empty DB -> []."""
+    cur = conn.execute(
+        """
+        SELECT
+            r.name AS restaurant_name,
+            COUNT(o.id) AS count,
+            COALESCE(
+                SUM(CASE WHEN o.status = 'DELIVERED' THEN o.total END),
+                0.0
+            ) AS revenue
+        FROM restaurants r
+        JOIN orders o ON o.restaurant_id = r.id
+        GROUP BY r.id, r.name
+        ORDER BY revenue DESC, count DESC, restaurant_name ASC
+        """
+    )
+    return [
+        {"restaurant_name": row[0], "count": row[1], "revenue": row[2]}
+        for row in cur.fetchall()
+    ]
+
+
+def get_top_items(conn: sqlite3.Connection, limit: int = 5) -> list[dict]:
+    """Return the most-ordered menu items across all restaurants:
+    [{"item_name": str, "restaurant_name": str, "quantity": int}]
+    ordered by quantity DESC, item_name ASC. Empty DB -> []."""
+    cur = conn.execute(
+        """
+        SELECT
+            mi.name AS item_name,
+            r.name AS restaurant_name,
+            SUM(oi.quantity) AS quantity
+        FROM order_items oi
+        JOIN menu_items mi ON mi.id = oi.menu_item_id
+        JOIN restaurants r ON r.id = mi.restaurant_id
+        GROUP BY mi.id, mi.name, r.name
+        ORDER BY quantity DESC, item_name ASC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    return [
+        {"item_name": row[0], "restaurant_name": row[1], "quantity": row[2]}
+        for row in cur.fetchall()
+    ]
+
+
+def get_recent_orders(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
+    """Return the most recent orders with customer and restaurant names:
+    [{"order_id": int, "customer": str, "restaurant": str, "total": float,
+    "status": str, "placed_at": str}] newest first. Empty DB -> []."""
+    cur = conn.execute(
+        """
+        SELECT
+            o.id AS order_id,
+            u.name AS customer,
+            r.name AS restaurant,
+            o.total AS total,
+            o.status AS status,
+            o.created_at AS placed_at
+        FROM orders o
+        JOIN users u ON u.id = o.customer_id
+        JOIN restaurants r ON r.id = o.restaurant_id
+        ORDER BY o.created_at DESC, o.id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    return [
+        {
+            "order_id": row[0],
+            "customer": row[1],
+            "restaurant": row[2],
+            "total": row[3],
+            "status": row[4],
+            "placed_at": row[5],
+        }
+        for row in cur.fetchall()
+    ]

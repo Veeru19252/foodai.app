@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 
 import eta_service
 import folium
+import forecast_service
+import plotly.express as px
 import streamlit as st
 import tracking
 from streamlit_autorefresh import st_autorefresh
@@ -46,6 +48,12 @@ from database import (
     log_trip_position,
     complete_delivery,
     update_order_status,
+    get_revenue_totals,
+    get_order_stats,
+    get_orders_per_day,
+    get_orders_per_restaurant,
+    get_top_items,
+    get_recent_orders,
 )
 from seed_data import seed_all
 
@@ -511,6 +519,191 @@ def show_customer_tracking(user) -> None:
         st.caption("AI-predicted ETA" if eta_source == "ml" else "Estimated ETA")
 
 
+# ---------- admin dashboard ----------
+
+def _demand_bucket_color(demand: float) -> str:
+    """Return the heatmap fill color for a predicted order count.
+
+    Buckets: <2 green, 2-4 yellow, 4-6 orange, >6 red.
+    """
+    if demand < 2:
+        return "green"
+    if demand < 4:
+        return "yellow"
+    if demand < 6:
+        return "orange"
+    return "red"
+
+
+def _today_orders_per_zone(conn: sqlite3.Connection) -> dict[str, list[int]]:
+    """Return today's order counts per zone, bucketed by hour.
+
+    orders table has no zone column; derive zone from restaurant coordinates.
+    Each value is a dense hourly list for hours 0..current (oldest first), so
+    the final element is the most recent hour count; hours without orders are
+    filled with 0. No orders today -> {} (forecast_service handles the empty
+    case with its moving-average defaults).
+    """
+    rows = conn.execute(
+        """
+        SELECT restaurant_id, created_at
+        FROM orders
+        WHERE date(created_at) = date('now')
+        """
+    ).fetchall()
+    if not rows:
+        return {}
+
+    zone_hourly: dict[str, dict[int, int]] = {}
+    for restaurant_id, created_at in rows:
+        coords = tracking.COORDINATES.get(restaurant_id)
+        if coords is None:
+            continue
+        zone = eta_service.nearest_zone(*coords)
+        hour = int(created_at[11:13])  # "YYYY-MM-DD HH:MM:SS" (UTC) -> hour
+        zone_hourly.setdefault(zone, {}).setdefault(hour, 0)
+        zone_hourly[zone][hour] += 1
+
+    current_hour = datetime.now().hour
+    return {
+        zone: [counts.get(hour, 0) for hour in range(current_hour + 1)]
+        for zone, counts in zone_hourly.items()
+    }
+
+
+def show_admin_dashboard() -> None:
+    """Admin page: KPIs, analytics charts, demand heatmap, recent orders."""
+    st.title("📊 Admin Dashboard")
+    st.caption("Live overview of revenue, order volume, and zone-level demand.")
+
+    # --- KPI cards ---
+    conn = get_connection()
+    revenue_totals = get_revenue_totals(conn)
+    conn.close()
+    conn = get_connection()
+    order_stats = get_order_stats(conn)
+    conn.close()
+
+    avg_order_value = (
+        revenue_totals["total"] / order_stats["delivered"]
+        if order_stats["delivered"] > 0
+        else 0.0
+    )
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Today Revenue", f"₹{revenue_totals['today']:.0f}")
+    col2.metric("Total Orders", f"{order_stats['total_orders']}")
+    col3.metric("Active Orders", f"{order_stats['active']}")
+    col4.metric("Avg Order Value", f"₹{avg_order_value:.0f}")
+
+    # --- Orders per day + revenue trend (same source: get_orders_per_day) ---
+    conn = get_connection()
+    orders_per_day = get_orders_per_day(conn)
+    conn.close()
+    if orders_per_day:
+        fig_day = px.bar(orders_per_day, x="day", y="count", title="Orders per day")
+        st.plotly_chart(fig_day, use_container_width=True)
+        fig_rev = px.line(
+            orders_per_day, x="day", y="revenue", title="Revenue trend (last 7 days)"
+        )
+        st.plotly_chart(fig_rev, use_container_width=True)
+    else:
+        st.info("No order data available yet to chart.")
+
+    # --- Orders per restaurant ---
+    conn = get_connection()
+    orders_per_restaurant = get_orders_per_restaurant(conn)
+    conn.close()
+    if orders_per_restaurant:
+        fig_rest = px.bar(
+            orders_per_restaurant,
+            x="restaurant_name",
+            y="count",
+            title="Orders per restaurant",
+        )
+        st.plotly_chart(fig_rest, use_container_width=True)
+    else:
+        st.info("No restaurant order data available yet.")
+
+    # --- Top items ---
+    conn = get_connection()
+    top_items = get_top_items(conn)
+    conn.close()
+    if top_items:
+        fig_items = px.bar(
+            top_items,
+            x="quantity",
+            y="item_name",
+            orientation="h",
+            title="Top items by quantity",
+        )
+        st.plotly_chart(fig_items, use_container_width=True)
+    else:
+        st.info("No item sales data available yet.")
+
+    # --- Demand heatmap (next-hour forecast per zone) ---
+    st.subheader("Demand heatmap (next-hour forecast per zone)")
+    conn = get_connection()
+    prev_counts_by_zone = _today_orders_per_zone(conn)
+    conn.close()
+    now = datetime.now()
+    predicted = forecast_service.forecast_all_zones(
+        now.hour,
+        now.weekday(),
+        1 if now.weekday() in (5, 6) else 0,
+        prev_counts_by_zone,
+    )
+
+    m = folium.Map(location=tracking.BENGALURU_CENTER, zoom_start=13)
+    for zone, anchor in eta_service.ZONE_ANCHORS.items():
+        demand = predicted.get(zone, 0.0)
+        folium.CircleMarker(
+            location=anchor,
+            radius=14,
+            popup=f"Zone {zone}: {demand:.1f} predicted orders",
+            tooltip=f"Zone {zone}",
+            fill=True,
+            fill_color=_demand_bucket_color(demand),
+            fill_opacity=0.75,
+            color="black",
+            weight=1,
+        ).add_to(m)
+
+    legend_html = """
+    <div style="position: fixed; bottom: 30px; left: 30px; z-index: 9999;
+                background: white; padding: 8px 12px; border-radius: 6px;
+                border: 1px solid #ccc; font-family: sans-serif; font-size: 12px;">
+      <b>Predicted demand</b><br>
+      <span style="display:inline-block; width:10px; height:10px;
+                   background: green; border-radius:50%;"></span> &lt;2 orders<br>
+      <span style="display:inline-block; width:10px; height:10px;
+                   background: yellow; border-radius:50%;"></span> 2-4 orders<br>
+      <span style="display:inline-block; width:10px; height:10px;
+                   background: orange; border-radius:50%;"></span> 4-6 orders<br>
+      <span style="display:inline-block; width:10px; height:10px;
+                   background: red; border-radius:50%;"></span> &gt;6 orders
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(legend_html))
+    # returned_objects=[] keeps the map read-only (no click-driven reruns).
+    st_folium(
+        m,
+        key="admin_demand_map",
+        use_container_width=True,
+        height=450,
+        returned_objects=[],
+    )
+
+    # --- Recent orders ---
+    st.subheader("Recent orders")
+    conn = get_connection()
+    recent_orders = get_recent_orders(conn, 10)
+    conn.close()
+    if recent_orders:
+        st.dataframe(recent_orders, use_container_width=True)
+    else:
+        st.info("No orders placed yet.")
+
+
 # ---------- main ----------
 
 def main() -> None:
@@ -545,6 +738,13 @@ def main() -> None:
         page = st.sidebar.radio("Navigate", ["Delivery Panel", "Logout"])
         if page == "Delivery Panel":
             show_delivery_panel(user)
+        else:
+            st.session_state.pop("user", None)
+            st.rerun()
+    elif user[4] == "admin":
+        page = st.sidebar.radio("Navigate", ["Admin Dashboard", "Logout"])
+        if page == "Admin Dashboard":
+            show_admin_dashboard()
         else:
             st.session_state.pop("user", None)
             st.rerun()

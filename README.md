@@ -67,14 +67,16 @@ A Swiggy-style food delivery platform with **real-time tracking** and **machine 
 
 > **Quick demo script:** Login as `customer@foodai.com` → order from "Spice Garden" → watch the delivery partner move live on the map → see the AI-predicted ETA update.
 
+> **Admin demo script:** Login as `admin@foodai.com` / `password123` → Admin Dashboard shows Today Revenue, Total Orders, Active Orders and Avg Order Value metric cards → plotly charts (orders per day, revenue trend, orders per restaurant, top-selling items) → demand heatmap with zone circles colored green (<2) / yellow (2-4) / orange (4-6) / red (>6) by forecast_service predicted orders → recent orders table. The heatmap uses the XGBoost demand model with a moving-average fallback.
+
 ---
 
 ## 📸 Screenshots
 
-*[Add screenshots here — recommended: ① Restaurant listing ② Menu + cart ③ Live tracking map ④ Admin demand heatmap]*
+*[Add screenshots here — recommended: ① Restaurant listing ② Menu + cart ③ Live tracking map ④ Admin Dashboard (metric cards + heatmap)]*
 
 ```
-① Restaurant Listing    ② Menu & Cart       ③ Live Tracking        ④ Admin Heatmap
+① Restaurant Listing    ② Menu & Cart       ③ Live Tracking        ④ Admin Dashboard (metric cards + heatmap)
 [placeholder]           [placeholder]        [placeholder]          [placeholder]
 ```
 
@@ -355,14 +357,14 @@ pytest tests/
 
 ## 🗓️ Roadmap
 
-| Phase | Weeks | Deliverable |
-|---|---|---|
-| Learning | 0–3 | Python, pandas, ML, Streamlit basics |
-| Platform core | 4–5 | Auth, restaurants, cart, checkout, order flow |
-| Live tracking | 6 | Map + simulated GPS |
-| **ML #1: ETA** | 7 | XGBoost ETA beats baseline |
-| **ML #2: Forecasting** | 8 | Heatmap + comparison table |
-| Admin + deploy | 9 | Dashboard + Hugging Face + demo video |
+| Phase | Weeks | Deliverable | Status |
+|---|---|---|---|
+| Learning | 0–3 | Python, pandas, ML, Streamlit basics | ✅ |
+| Platform core | 4–5 | Auth, restaurants, cart, checkout, order flow | ✅ |
+| Live tracking | 6 | Map + simulated GPS | ✅ |
+| **ML #1: ETA** | 7 | XGBoost ETA beats baseline | ✅ |
+| **ML #2: Forecasting** | 8 | Heatmap + comparison table | ✅ |
+| Admin + deploy | 9 | ✅ Admin dashboard · ☐ Hugging Face Spaces · ☐ demo video | 🚧 In progress |
 
 ---
 
