@@ -21,6 +21,7 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 
+import eta_service
 import folium
 import streamlit as st
 import tracking
@@ -311,7 +312,8 @@ def show_delivery_panel(user) -> None:
         st.error(f"Order #{order_id} not found.")
         return
 
-    start = tracking.restaurant_coordinates(rest_row[0])
+    restaurant_id = rest_row[0]
+    start = tracking.restaurant_coordinates(restaurant_id)
     end = tracking.customer_home_coordinates()
     route = tracking.build_route(start, end)
 
@@ -359,8 +361,9 @@ def show_delivery_panel(user) -> None:
         log_trip_position(conn, delivery_id, *rider_position)
         conn.close()
 
-    eta_min = tracking.compute_eta(route, progress, tracking.AVG_SPEED_KMH)
+    eta_min, eta_source = eta_service.best_eta(route, progress, restaurant_id)
     st.metric("Estimated arrival", tracking.format_eta(eta_min))
+    st.caption("AI-predicted ETA" if eta_source == "ml" else "Estimated ETA")
 
     m = folium.Map(location=start, zoom_start=13)
     folium.PolyLine(route, color="blue", weight=3).add_to(m)
@@ -437,7 +440,8 @@ def show_customer_tracking(user) -> None:
         st.error(f"Order #{order_id} not found.")
         return
 
-    start = tracking.restaurant_coordinates(rest_row[0])
+    restaurant_id = rest_row[0]
+    start = tracking.restaurant_coordinates(restaurant_id)
     end = tracking.customer_home_coordinates()
     route = tracking.build_route(start, end)
 
@@ -502,8 +506,9 @@ def show_customer_tracking(user) -> None:
             if total_seconds > 0
             else 1.0
         )
-        eta_min = tracking.compute_eta(route, progress, tracking.AVG_SPEED_KMH)
+        eta_min, eta_source = eta_service.best_eta(route, progress, restaurant_id)
         st.metric("Estimated arrival", tracking.format_eta(eta_min))
+        st.caption("AI-predicted ETA" if eta_source == "ml" else "Estimated ETA")
 
 
 # ---------- main ----------

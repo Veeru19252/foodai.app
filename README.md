@@ -293,10 +293,15 @@ foodai/
 │   └── forecast_model.joblib
 ├── scripts/                # (Person B) reusable scripts
 │   ├── simulate_orders.py
+│   ├── train_eta.py
 │   ├── predict_eta.py
 │   └── forecast.py
 └── outputs/                # (Person B) charts + tables
+    ├── metrics_eta.json
     └── charts/
+        ├── eta_metrics_comparison.png
+        ├── eta_feature_importance.png
+        └── eta_actual_vs_predicted.png
 ```
 
 ---
@@ -322,13 +327,17 @@ pytest tests/
 
 ## 📈 Performance Metrics
 
-### ETA Prediction (fill in your numbers)
+### ETA Prediction
 | Model | MAE (min) | RMSE |
 |---|---|---|
-| Baseline (distance ÷ 20 km/h) | ~12 | ~16 |
-| Linear Regression | TBD | TBD |
-| Random Forest | TBD | TBD |
-| **XGBoost** | **TBD** | **TBD** |
+| Baseline (distance ÷ 20 km/h) | 2.84 | 3.63 |
+| Linear Regression | 1.93 | 2.47 |
+| Random Forest | 1.65 | 2.00 |
+| **XGBoost** | **2.03** | **2.61** |
+
+*XGBoost is our deployed model (beats baseline by ~28%); Random Forest performed slightly better on this small simulated dataset.*
+
+**Retrain the ETA model:** `.venv/bin/python scripts/train_eta.py`
 
 ### Demand Forecasting (fill in your numbers)
 | Model | RMSE (orders/hr/zone) | MAPE |
