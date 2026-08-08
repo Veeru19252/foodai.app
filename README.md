@@ -33,6 +33,7 @@ A Swiggy-style food delivery platform with **real-time tracking** and **machine 
 - [Testing](#-testing)
 - [Performance Metrics](#-performance-metrics)
 - [Roadmap](#-roadmap)
+- [Deploy to Hugging Face Spaces](#-deploy-to-hugging-face-spaces)
 - [Future Improvements](#-future-improvements)
 - [Challenges Faced](#-challenges-faced)
 - [Lessons Learned](#-lessons-learned)
@@ -52,17 +53,19 @@ A Swiggy-style food delivery platform with **real-time tracking** and **machine 
 - **Live order tracking** — simulated delivery GPS moving on a map
 - **Restaurant panel** — accept/reject orders, manage menu
 - **Admin dashboard** — revenue, order analytics, demand heatmap
+- **Promo codes** — apply WELCOME10 / FLAT50 / FOODIE20 at checkout; discount validated, applied to the total, and stored on the order
 
 ### 🧠 AI / ML
 - **ETA prediction (XGBoost)** — predicts delivery time in minutes; beats the simple distance-based baseline
 - **Demand forecasting** — predicts orders per zone for the next hour; drives the admin heatmap + driver pre-positioning
 - **Rigorous evaluation** — baseline vs ML comparison tables (MAE / RMSE / MAPE)
+- **Model explainability (SHAP)** — the tracking page shows 'Why this ETA?' with per-feature contributions via SHAP TreeExplainer; gracefully falls back when the model is unavailable
 
 ---
 
 ## 🎥 Demo
 
-🔗 **Live Demo:** *[Add your Hugging Face Spaces URL here after deployment (Week 9)]*
+🔗 **Live Demo:** *[Add your Hugging Face Spaces URL here — see Deploy to Hugging Face Spaces below]*
 
 📹 **Demo Video:** *[Add your YouTube demo link here]*
 
@@ -71,6 +74,11 @@ A Swiggy-style food delivery platform with **real-time tracking** and **machine 
 > **Admin demo script:** Login as `admin@foodai.com` / `password123` → Admin Dashboard shows Today Revenue, Total Orders, Active Orders and Avg Order Value metric cards → plotly charts (orders per day, revenue trend, orders per restaurant, top-selling items) → demand heatmap with zone circles colored green (<2) / yellow (2-4) / orange (4-6) / red (>6) by forecast_service predicted orders → recent orders table. The heatmap uses the XGBoost demand model with a moving-average fallback.
 
 > **Register:** The login page has a Register tab — create a customer account (name, email, password) and log in immediately.
+
+> **Promo codes:** type a code in the "Apply promo code" box on the cart page to apply it at checkout:
+> - `WELCOME10` — 10% off (min ₹100, max ₹50)
+> - `FLAT50` — ₹50 off (min ₹200)
+> - `FOODIE20` — 20% off (min ₹300, max ₹150)
 
 ---
 
@@ -272,7 +280,7 @@ All configuration lives at the top of the source files (no `.env` needed for the
 | GridSearchCV | Hyperparameter tuning | Best model selection |
 | Cross-validation | Evaluation | Reliable metrics |
 | One-hot encoding | Preprocessing | Categorical features |
-| SHAP (planned) | Explainability | Model interpretation |
+| SHAP | Explainability | Model interpretation |
 
 ---
 
@@ -371,9 +379,28 @@ pytest tests/
 
 ---
 
+## 🚀 Deploy to Hugging Face Spaces
+
+1. **Create a Space** at [huggingface.co](https://huggingface.co) → **New Space** → SDK: **Streamlit** → name it (e.g. `foodai-app`) → Public or Private.
+2. **Build files are already present at the repo root** — `.streamlit/config.toml` (theme) and `setup.sh` (`pip install -r requirements.txt`).
+3. **Push via CLI:**
+
+   ```bash
+   pip install huggingface_hub
+   huggingface-cli login    # paste a read/write token
+   git remote add space https://huggingface.co/spaces/<your-username>/foodai-app
+   git push space main
+   ```
+
+   **Alternative:** upload the files via the web UI (Files tab → Add file → Upload files).
+4. **Files that MUST be committed:** `app.py`, `database.py`, `seed_data.py`, `tracking.py`, `eta_service.py`, `forecast_service.py`, `explain_service.py`, `requirements.txt`, `.streamlit/config.toml`, `setup.sh`, `models/eta_model.joblib`, `models/forecast_model.joblib`, `models/forecast_meta.json`.
+5. **Note:** `foodai.db` is gitignored (`*.db`) — the app auto-creates + seeds the database on first boot (an empty demo DB gets seeded automatically). `outputs/` and `data/` are optional.
+
+---
+
 ## 🔮 Future Improvements
 
-- [ ] **Hugging Face Spaces deployment** — host the app on free Streamlit hosting
+- [x] **Hugging Face Spaces deployment** — docs + build files ready (see Deploy to Hugging Face Spaces; push with your HF token)
 - [ ] **Demo video** — record a walkthrough for the final submission
 - [ ] **WebSockets** instead of polling — true real-time tracking
 - [ ] **Real GPS tracking** — replace simulated GPS with actual device location
@@ -383,7 +410,6 @@ pytest tests/
 - [ ] **LSTM / DeepAR** for forecasting (beyond XGBoost)
 - [ ] **Mobile-friendly UI** or PWA
 - [ ] **Notifications** (email/WhatsApp-style logs)
-- [ ] **SHAP explainability** in the demo
 
 ---
 

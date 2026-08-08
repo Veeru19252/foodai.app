@@ -12,6 +12,7 @@ How to use (Person A):
 """
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 # One database file lives next to this file.
@@ -52,6 +53,8 @@ CREATE TABLE IF NOT EXISTS orders (
     delivery_id INTEGER,
     status TEXT NOT NULL DEFAULT 'PLACED',
     total REAL NOT NULL DEFAULT 0.0,
+    coupon_code TEXT,
+    discount_amount REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (customer_id) REFERENCES users (id),
     FOREIGN KEY (restaurant_id) REFERENCES restaurants (id),
@@ -86,6 +89,21 @@ CREATE TABLE IF NOT EXISTS trip_logs (
     timestamp TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (delivery_id) REFERENCES deliveries (id)
 );
+
+CREATE TABLE IF NOT EXISTS promo_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    description TEXT,
+    discount_type TEXT NOT NULL DEFAULT 'percent' CHECK (discount_type IN ('percent', 'flat')),
+    discount_value REAL NOT NULL,
+    min_order_value REAL NOT NULL DEFAULT 0,
+    max_discount REAL,
+    valid_until TEXT,
+    usage_limit INTEGER,
+    times_used INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 
@@ -95,11 +113,33 @@ def get_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Create all tables. Safe to call multiple times."""
+    """Create all tables. Safe to call multiple times.
+
+    Also upgrades existing databases by adding columns that were introduced
+    after the original schema (see _ensure_column), so an old foodai.db
+    works with the new helpers. Rerun-safe.
+    """
     conn = get_connection()
     conn.executescript(SCHEMA)
+    _ensure_column(conn, "orders", "coupon_code", "coupon_code TEXT")
+    _ensure_column(
+        conn,
+        "orders",
+        "discount_amount",
+        "discount_amount REAL NOT NULL DEFAULT 0",
+    )
     conn.commit()
     conn.close()
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    """Add a column to an existing table if it does not exist (SQLite has no IF NOT EXISTS for ALTER).
+
+    `table` and `ddl` are internal constants from this module, never user input.
+    """
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
 
 
 # ---- Query helpers (pure functions: same input -> same output) ----
@@ -151,12 +191,22 @@ def create_order(
     customer_id: int,
     restaurant_id: int,
     items: list[tuple[int, int, float]],  # [(menu_item_id, quantity, price)]
+    coupon_code: str | None = None,
+    discount_amount: float = 0.0,
 ) -> int:
-    """Create an order with its items. Returns the new order id."""
-    total = sum(quantity * price for _, quantity, price in items)
+    """Create an order with its items. Returns the new order id.
+
+    The stored `total` is the FINAL PAID amount: item subtotal minus any
+    promo discount (discount_amount), floored at 0. Backward-compatible —
+    with no coupon, total is exactly the item subtotal and the new columns
+    are stored as NULL / 0.0.
+    """
+    subtotal = sum(quantity * price for _, quantity, price in items)
+    total = max(0.0, subtotal - discount_amount)
     cur = conn.execute(
-        "INSERT INTO orders (customer_id, restaurant_id, total) VALUES (?, ?, ?)",
-        (customer_id, restaurant_id, total),
+        "INSERT INTO orders (customer_id, restaurant_id, total, coupon_code, discount_amount) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (customer_id, restaurant_id, total, coupon_code, discount_amount),
     )
     order_id = cur.lastrowid
     for menu_item_id, quantity, price in items:
@@ -501,3 +551,93 @@ def get_recent_orders(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
         }
         for row in cur.fetchall()
     ]
+
+
+# ---- Promo code helpers ----
+
+def get_promo_codes(conn: sqlite3.Connection) -> list[dict]:
+    """Return all promo codes, oldest first:
+    [{"id": int, "code": str, "discount_type": str, ...}] keyed by column name."""
+    cur = conn.execute("SELECT * FROM promo_codes ORDER BY id")
+    columns = [desc[0] for desc in cur.description]
+    return [dict(zip(columns, row)) for row in cur.fetchall()]
+
+
+def get_promo_by_code(conn: sqlite3.Connection, code: str) -> dict | None:
+    """Return one promo code (case-insensitive match) keyed by column name, or None."""
+    cur = conn.execute(
+        "SELECT * FROM promo_codes WHERE code = ? COLLATE NOCASE",
+        (code,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    columns = [desc[0] for desc in cur.description]
+    return dict(zip(columns, row))
+
+
+def validate_promo_code(
+    conn: sqlite3.Connection, code: str, order_total: float
+) -> tuple[bool, str, dict | None]:
+    """Validate a promo code for an order total.
+
+    Checks in order: exists, active, not expired, meets minimum order,
+    under usage limit. Returns (True, "Promo code applied!", promo) on
+    success; otherwise (False, reason, None). Does not mutate usage counts.
+    """
+    promo = get_promo_by_code(conn, code)
+    if promo is None:
+        return False, "Invalid promo code.", None
+    if promo["active"] != 1:
+        return False, "This promo code is no longer active.", None
+    if promo["valid_until"] is not None:
+        today_utc = datetime.now(timezone.utc).date().isoformat()
+        if promo["valid_until"][:10] < today_utc:
+            return False, "This promo code has expired.", None
+    if order_total < promo["min_order_value"]:
+        return (
+            False,
+            f"This promo requires a minimum order of ₹{promo['min_order_value']:.0f}.",
+            None,
+        )
+    if promo["usage_limit"] is not None and promo["times_used"] >= promo["usage_limit"]:
+        return False, "This promo code has reached its usage limit.", None
+    return True, "Promo code applied!", promo
+
+
+def calculate_discount(promo: dict, order_total: float) -> float:
+    """Return the discount amount for a promo applied to an order total.
+
+    percent → min(order_total * discount_value/100, max_discount or order_total);
+    flat → min(discount_value, order_total). Rounded to 2 decimals; never
+    negative and never exceeds order_total.
+    """
+    if promo["discount_type"] == "flat":
+        discount = min(promo["discount_value"], order_total)
+    else:  # percent
+        raw = order_total * promo["discount_value"] / 100
+        cap = promo["max_discount"] if promo["max_discount"] is not None else order_total
+        discount = min(raw, cap)
+    return round(max(0.0, min(discount, order_total)), 2)
+
+
+def apply_promo(
+    conn: sqlite3.Connection, code: str, order_total: float
+) -> tuple[bool, str, float]:
+    """Validate a promo code and return (ok, message, discount_amount).
+
+    Does NOT increment times_used — that happens only on order placement.
+    """
+    ok, message, promo = validate_promo_code(conn, code, order_total)
+    if not ok:
+        return False, message, 0.0
+    return True, message, calculate_discount(promo, order_total)
+
+
+def increment_promo_usage(conn: sqlite3.Connection, promo_id: int) -> None:
+    """Increment a promo code's times_used counter (called on order placement)."""
+    conn.execute(
+        "UPDATE promo_codes SET times_used = times_used + 1 WHERE id = ?",
+        (promo_id,),
+    )
+    conn.commit()

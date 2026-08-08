@@ -22,6 +22,7 @@ import time
 from datetime import datetime, timezone
 
 import eta_service
+import explain_service
 import folium
 import forecast_service
 import plotly.express as px
@@ -55,6 +56,10 @@ from database import (
     get_orders_per_restaurant,
     get_top_items,
     get_recent_orders,
+    get_promo_codes,
+    get_promo_by_code,
+    apply_promo,
+    increment_promo_usage,
 )
 from seed_data import seed_all
 
@@ -223,7 +228,45 @@ def show_cart_page(user) -> None:
             st.rerun()
 
     st.divider()
-    st.write(f"**Total: ₹{cart_total(cart):.0f}**")
+
+    subtotal = cart_total(cart)
+    promo = st.session_state.get("promo")
+    # Recompute the discount against the current subtotal so a stale session
+    # value can never exceed the subtotal (e.g. the cart changed after the
+    # promo was applied). calculate_discount enforces this in database.py;
+    # we clamp defensively here too.
+    discount = min(float(promo["discount"]), subtotal) if promo else 0.0
+
+    st.write(f"**Subtotal: ₹{subtotal:.0f}**")
+
+    if promo is None:
+        with st.expander("Apply promo code"):
+            promo_code = st.text_input("Promo code", key="promo_input")
+            if st.button("Apply", key="apply_promo_btn"):
+                code = promo_code.strip()
+                conn = get_connection()
+                ok, message, new_discount = apply_promo(conn, code, subtotal)
+                if ok:
+                    promo_row = get_promo_by_code(conn, code)
+                    conn.close()
+                    clamped = min(new_discount, subtotal)
+                    st.session_state["promo"] = {
+                        "code": code,
+                        "discount": clamped,
+                        "promo_id": promo_row["id"] if promo_row else None,
+                    }
+                    st.success(f"{message} You save ₹{clamped:.2f}!")
+                    st.rerun()
+                else:
+                    conn.close()
+                    st.session_state.pop("promo", None)
+                    st.error(message)
+    else:
+        st.write(f"**Promo discount ({promo['code']}): -₹{discount:.0f}**")
+        st.write(f"**Final total: ₹{subtotal - discount:.0f}**")
+        if st.button("Remove promo", key="remove_promo_btn"):
+            st.session_state.pop("promo", None)
+            st.rerun()
 
     st.subheader("Delivery address")
     address = st.text_input("Address", value="Hostel Block C, MG Road")
@@ -242,11 +285,28 @@ def show_cart_page(user) -> None:
             for item_id, item in cart.items()
         ]
         conn = get_connection()
-        order_id = create_order(conn, user[0], restaurant_id, items)
+        if promo is not None:
+            # Clamp the stored discount against the current subtotal so it can
+            # never exceed what the customer actually pays.
+            order_discount = min(float(promo["discount"]), cart_total(cart))
+            order_id = create_order(
+                conn,
+                user[0],
+                restaurant_id,
+                items,
+                coupon_code=promo["code"],
+                discount_amount=order_discount,
+            )
+            # Usage is counted only after the order is actually created.
+            if promo.get("promo_id") is not None:
+                increment_promo_usage(conn, promo["promo_id"])
+        else:
+            order_id = create_order(conn, user[0], restaurant_id, items)
         conn.close()
 
         st.success(f"✅ Order #{order_id} placed! Status: PLACED")
         st.session_state["cart"] = {}
+        st.session_state.pop("promo", None)
         st.rerun()
 
 
@@ -567,6 +627,35 @@ def show_customer_tracking(user) -> None:
         st.metric("Estimated arrival", tracking.format_eta(eta_min))
         st.caption("AI-predicted ETA" if eta_source == "ml" else "Estimated ETA")
 
+        with st.expander("Why this ETA?"):
+            explanation = explain_service.explain_eta(
+                eta_service.features_for_order(
+                    restaurant_id,
+                    distance_km=tracking.route_length_km(route),
+                    prep_time_min=15,
+                )
+            )
+            if explanation is None:
+                st.caption("Model explanation unavailable.")
+            else:
+                top = explanation["contributions"][:8]
+                import pandas as pd
+                df = pd.DataFrame(top)
+                df["color"] = df["shap"].apply(lambda v: "green" if v >= 0 else "red")
+                fig = px.bar(
+                    df,
+                    x="shap",
+                    y="feature",
+                    orientation="h",
+                    color="color",
+                    color_discrete_map={"green": "#2E7D32", "red": "#C62828"},
+                    title="Feature contributions to the ETA",
+                    labels={"shap": "Minutes contribution", "feature": ""},
+                )
+                fig.update_layout(showlegend=False, height=320)
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption(f"Base prediction: {explanation['base_value']:.1f} min")
+
 
 # ---------- admin dashboard ----------
 
@@ -751,6 +840,28 @@ def show_admin_dashboard() -> None:
         st.dataframe(recent_orders, use_container_width=True)
     else:
         st.info("No orders placed yet.")
+
+    # --- Promo codes ---
+    st.subheader("Promo codes")
+    conn = get_connection()
+    promos = get_promo_codes(conn)
+    conn.close()
+    if promos:
+        promo_columns = (
+            "code",
+            "discount_type",
+            "discount_value",
+            "min_order_value",
+            "max_discount",
+            "times_used",
+            "active",
+        )
+        st.dataframe(
+            [{col: row[col] for col in promo_columns} for row in promos],
+            use_container_width=True,
+        )
+    else:
+        st.info("No promo codes yet.")
 
 
 # ---------- main ----------

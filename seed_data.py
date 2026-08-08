@@ -1,7 +1,7 @@
 """
 FoodAI - Seed data
 ==================
-Fills the database with demo data (5 restaurants, menu items, users).
+Fills the database with demo data (5 restaurants, menu items, users, promo codes).
 
 How to use (Person A):
     from database import init_db
@@ -67,6 +67,14 @@ USERS = [
     ("Admin", "admin@foodai.com", "password123", "admin"),
 ]
 
+PROMOS = [
+    # code, description, discount_type, discount_value, min_order_value,
+    # max_discount, valid_until, usage_limit, times_used, active
+    ("WELCOME10", "10% off up to ₹50 on orders above ₹100", "percent", 10, 100, 50, None, 100, 0, 1),
+    ("FLAT50", "Flat ₹50 off on orders above ₹200", "flat", 50, 200, None, None, 50, 0, 1),
+    ("FOODIE20", "20% off up to ₹150 on orders above ₹300", "percent", 20, 300, 150, "2026-12-31", 30, 0, 1),
+]
+
 
 def _hash_password(password: str) -> str:
     """Return a hashed password (simple SHA-256 for the demo)."""
@@ -116,11 +124,30 @@ def seed_restaurants(conn) -> None:
     conn.commit()
 
 
+def seed_promos(conn) -> None:
+    """Insert demo promo codes (skip if the code already exists)."""
+    for (code, description, discount_type, discount_value, min_order_value,
+         max_discount, valid_until, usage_limit, times_used, active) in PROMOS:
+        exists = conn.execute(
+            "SELECT 1 FROM promo_codes WHERE code = ?", (code,)
+        ).fetchone()
+        if not exists:
+            conn.execute(
+                "INSERT INTO promo_codes (code, description, discount_type, discount_value, "
+                "min_order_value, max_discount, valid_until, usage_limit, times_used, active) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (code, description, discount_type, discount_value, min_order_value,
+                 max_discount, valid_until, usage_limit, times_used, active),
+            )
+    conn.commit()
+
+
 def seed_all() -> None:
-    """Seed users, then restaurants (restaurant owners must exist first)."""
+    """Seed users, then restaurants (owners must exist first), then promo codes."""
     conn = get_connection()
     seed_users(conn)
     seed_restaurants(conn)
+    seed_promos(conn)
     conn.close()
     print("Seeding complete! Try logging in with customer@foodai.com / password123")
 
