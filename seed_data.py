@@ -63,6 +63,7 @@ USERS = [
     ("Pizza Junction Owner", "pizza@foodai.com", "password123", "restaurant"),
     ("Burger Barn Owner", "burger@foodai.com", "password123", "restaurant"),
     ("Rider Ram", "rider@foodai.com", "password123", "delivery"),
+    ("Rider Priya", "priya@foodai.com", "password123", "delivery"),
     ("Admin", "admin@foodai.com", "password123", "admin"),
 ]
 

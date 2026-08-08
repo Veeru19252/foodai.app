@@ -203,3 +203,126 @@ def get_order_items(conn: sqlite3.Connection, order_id: int) -> list[tuple]:
         (order_id,),
     )
     return cur.fetchall()
+
+
+# ---- Delivery workflow helpers ----
+
+def assign_delivery(conn: sqlite3.Connection, order_id: int, driver_id: int) -> int:
+    """Assign a driver to an order; returns the delivery id.
+
+    If the order already has a delivery row, returns its existing id
+    instead of creating a duplicate assignment.
+    """
+    cur = conn.execute(
+        "SELECT id FROM deliveries WHERE order_id = ?",
+        (order_id,),
+    )
+    existing = cur.fetchone()
+    if existing is not None:
+        return existing[0]
+    cur = conn.execute(
+        "INSERT INTO deliveries (order_id, driver_id) VALUES (?, ?)",
+        (order_id, driver_id),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_assigned_delivery_for_order(conn: sqlite3.Connection, order_id: int) -> tuple | None:
+    """Return the delivery row for an order:
+    (id, driver_id, pickup_time, delivered_time) or None."""
+    cur = conn.execute(
+        """
+        SELECT id, driver_id, pickup_time, delivered_time
+        FROM deliveries
+        WHERE order_id = ?
+        """,
+        (order_id,),
+    )
+    return cur.fetchone()
+
+
+def log_trip_position(
+    conn: sqlite3.Connection, delivery_id: int, lat: float, lng: float
+) -> None:
+    """Log one GPS position for a delivery."""
+    conn.execute(
+        "INSERT INTO trip_logs (delivery_id, lat, lng) VALUES (?, ?, ?)",
+        (delivery_id, lat, lng),
+    )
+    conn.commit()
+
+
+def get_latest_trip_position(conn: sqlite3.Connection, delivery_id: int) -> tuple | None:
+    """Return the most recent trip position for a delivery:
+    (lat, lng, timestamp) or None."""
+    cur = conn.execute(
+        """
+        SELECT lat, lng, timestamp
+        FROM trip_logs
+        WHERE delivery_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (delivery_id,),
+    )
+    return cur.fetchone()
+
+
+def get_available_delivery_drivers(conn: sqlite3.Connection) -> list[tuple]:
+    """Return all delivery drivers: (id, name, email)."""
+    cur = conn.execute(
+        "SELECT id, name, email FROM users WHERE role = 'delivery' ORDER BY name"
+    )
+    return cur.fetchall()
+
+
+def get_deliveries_for_driver(conn: sqlite3.Connection, driver_id: int) -> list[tuple]:
+    """Return a driver's deliveries with order and party details:
+    (delivery_id, order_id, restaurant_name, customer_name, order_status,
+    pickup_time, delivered_time), newest first."""
+    cur = conn.execute(
+        """
+        SELECT d.id, d.order_id, r.name, u.name, o.status, d.pickup_time, d.delivered_time
+        FROM deliveries d
+        JOIN orders o ON o.id = d.order_id
+        JOIN restaurants r ON r.id = o.restaurant_id
+        JOIN users u ON u.id = o.customer_id
+        WHERE d.driver_id = ?
+        ORDER BY d.id DESC
+        """,
+        (driver_id,),
+    )
+    return cur.fetchall()
+
+
+def mark_delivery_picked_up(conn: sqlite3.Connection, delivery_id: int) -> None:
+    """Record the pickup time for a delivery."""
+    conn.execute(
+        "UPDATE deliveries SET pickup_time = datetime('now') WHERE id = ?",
+        (delivery_id,),
+    )
+    conn.commit()
+
+
+def complete_delivery(conn: sqlite3.Connection, delivery_id: int) -> None:
+    """Record the delivered time for a delivery."""
+    conn.execute(
+        "UPDATE deliveries SET delivered_time = datetime('now') WHERE id = ?",
+        (delivery_id,),
+    )
+    conn.commit()
+
+
+def find_active_delivery_for_order(conn: sqlite3.Connection, order_id: int) -> tuple | None:
+    """Return the active (not yet delivered) delivery row for an order:
+    (id, order_id, driver_id, pickup_time, delivered_time) or None."""
+    cur = conn.execute(
+        """
+        SELECT id, order_id, driver_id, pickup_time, delivered_time
+        FROM deliveries
+        WHERE order_id = ? AND delivered_time IS NULL
+        """,
+        (order_id,),
+    )
+    return cur.fetchone()
