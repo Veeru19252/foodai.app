@@ -35,6 +35,7 @@ from database import (
     get_restaurants,
     get_menu,
     get_user_by_email,
+    create_user,
     create_order,
     get_orders_for_customer,
     get_orders_for_restaurant,
@@ -67,6 +68,29 @@ def login(email: str, password: str) -> tuple | None:
     if user and user[3] == hashlib.sha256(password.encode()).hexdigest():
         return user
     return None
+
+
+def register_user(
+    conn: sqlite3.Connection, name: str, email: str, password: str
+) -> tuple[bool, str]:
+    """Create a customer account. Returns (success, message).
+
+    Validates non-empty fields, rejects duplicate emails, then inserts with a
+    'customer' role. Password is hashed exactly as typed so the login flow
+    (which hashes raw input) matches.
+    """
+    name = name.strip()
+    email = email.strip()
+    if not name or not email or not password.strip():
+        return False, "Please fill in all fields."
+    if get_user_by_email(conn, email) is not None:
+        return False, "An account with this email already exists."
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    try:
+        create_user(conn, name, email, password_hash, "customer")
+    except sqlite3.IntegrityError:
+        return False, "An account with this email already exists."
+    return True, "Account created! Please log in."
 
 
 def add_to_cart(menu_item_id: int, name: str, price: float) -> None:
@@ -119,15 +143,40 @@ def show_login_page() -> None:
     st.title("🍔 FoodAI")
     st.subheader("Login to continue")
 
-    email = st.text_input("Email", value="customer@foodai.com")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        user = login(email, password)
-        if user:
-            st.session_state["user"] = user
-            st.rerun()
-        else:
-            st.error("Invalid email or password. Try customer@foodai.com / password123")
+    tab_login, tab_register = st.tabs(["Login", "Register"])
+
+    with tab_login:
+        # Defaults read the registration prefill (set after a successful sign-up).
+        email = st.text_input(
+            "Email", value=st.session_state.get("reg_email", "customer@foodai.com")
+        )
+        password = st.text_input(
+            "Password", type="password", value=st.session_state.get("reg_password", "")
+        )
+        if st.button("Login"):
+            user = login(email, password)
+            if user:
+                st.session_state["user"] = user
+                st.rerun()
+            else:
+                st.error(
+                    "Invalid email or password. Try customer@foodai.com / password123"
+                )
+
+    with tab_register:
+        reg_name = st.text_input("Name")
+        reg_email = st.text_input("Email")
+        reg_password = st.text_input("Password", type="password")
+        if st.button("Register"):
+            conn = get_connection()
+            ok, message = register_user(conn, reg_name, reg_email, reg_password)
+            conn.close()
+            if ok:
+                st.session_state["reg_email"] = reg_email
+                st.session_state["reg_password"] = reg_password
+                st.success(message)
+            else:
+                st.error(message)
 
 
 def show_restaurant_listing() -> None:

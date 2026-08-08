@@ -130,6 +130,22 @@ def get_user_by_email(conn: sqlite3.Connection, email: str) -> tuple | None:
     return cur.fetchone()
 
 
+def create_user(
+    conn: sqlite3.Connection,
+    name: str,
+    email: str,
+    password_hash: str,
+    role: str,
+) -> int:
+    """Create a user row and return its new id."""
+    cur = conn.execute(
+        "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
+        (name, email, password_hash, role),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
 def create_order(
     conn: sqlite3.Connection,
     customer_id: int,

@@ -47,6 +47,7 @@ A Swiggy-style food delivery platform with **real-time tracking** and **machine 
 
 ### 🖥️ Platform
 - **4 roles** — Customer · Restaurant · Delivery Partner · Admin
+- **Customer signup** — register a new account from the login page
 - **Full order flow** — browse restaurants → menu → cart → checkout → live status tracking
 - **Live order tracking** — simulated delivery GPS moving on a map
 - **Restaurant panel** — accept/reject orders, manage menu
@@ -68,6 +69,8 @@ A Swiggy-style food delivery platform with **real-time tracking** and **machine 
 > **Quick demo script:** Login as `customer@foodai.com` → order from "Spice Garden" → watch the delivery partner move live on the map → see the AI-predicted ETA update.
 
 > **Admin demo script:** Login as `admin@foodai.com` / `password123` → Admin Dashboard shows Today Revenue, Total Orders, Active Orders and Avg Order Value metric cards → plotly charts (orders per day, revenue trend, orders per restaurant, top-selling items) → demand heatmap with zone circles colored green (<2) / yellow (2-4) / orange (4-6) / red (>6) by forecast_service predicted orders → recent orders table. The heatmap uses the XGBoost demand model with a moving-average fallback.
+
+> **Register:** The login page has a Register tab — create a customer account (name, email, password) and log in immediately.
 
 ---
 
@@ -364,13 +367,16 @@ pytest tests/
 | Live tracking | 6 | Map + simulated GPS | ✅ |
 | **ML #1: ETA** | 7 | XGBoost ETA beats baseline | ✅ |
 | **ML #2: Forecasting** | 8 | Heatmap + comparison table | ✅ |
-| Admin + deploy | 9 | ✅ Admin dashboard · ☐ Hugging Face Spaces · ☐ demo video | 🚧 In progress |
+| Admin + deploy | 9 | ✅ Admin dashboard · ✅ Customer signup/register · ☐ Hugging Face Spaces · ☐ demo video | ✅ done (deploy pending) |
 
 ---
 
 ## 🔮 Future Improvements
 
+- [ ] **Hugging Face Spaces deployment** — host the app on free Streamlit hosting
+- [ ] **Demo video** — record a walkthrough for the final submission
 - [ ] **WebSockets** instead of polling — true real-time tracking
+- [ ] **Real GPS tracking** — replace simulated GPS with actual device location
 - [ ] **Real payment** integration (Razorpay test mode)
 - [ ] **Real open dataset** training (Kaggle food delivery data)
 - [ ] **More features**: traffic-aware ETA, weather data
