@@ -1,0 +1,21 @@
+{
+  "feature_columns": [
+    "hour_of_day",
+    "day_of_week",
+    "is_weekend",
+    "prev_1h",
+    "prev_3h_avg",
+    "zone_A",
+    "zone_B",
+    "zone_C",
+    "zone_D",
+    "zone_E"
+  ],
+  "zones": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E"
+  ]
+}

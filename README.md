@@ -339,11 +339,17 @@ pytest tests/
 
 **Retrain the ETA model:** `.venv/bin/python scripts/train_eta.py`
 
-### Demand Forecasting (fill in your numbers)
+### Demand Forecasting
 | Model | RMSE (orders/hr/zone) | MAPE |
 |---|---|---|
-| Moving average | ~8 | ~38% |
-| **XGBoost** | **TBD** | **TBD** |
+| Moving average | 0.76 | 40.4% |
+| **XGBoost** | **0.66** | **32.9%** |
+
+*XGBoost beats the moving-average baseline by ~18% lower MAPE.*
+
+**Model artifacts:** `models/forecast_model.joblib`, `models/forecast_meta.json`, `outputs/metrics_forecast.json`, `outputs/charts/forecast_*.png`
+
+**Retrain the forecast model:** `.venv/bin/python scripts/train_forecast.py`
 
 ---
 
