@@ -121,3 +121,44 @@ export interface AdminOverview {
   restaurants: number;
   menu_items: number;
 }
+
+export interface ForecastSeriesItem {
+  hour: number;
+  label: string;
+  zones: Record<string, number>;
+}
+
+export interface ForecastSeries {
+  series: ForecastSeriesItem[];
+  fallback: boolean;
+}
+
+export interface Contribution {
+  feature: string;
+  value: number;
+  shap: number;
+}
+
+export interface OrderPrediction {
+  order_id: number;
+  restaurant_id: number;
+  eta_min: number | null;
+  fallback: boolean;
+  features: Record<string, number>;
+  explanation: {
+    base_value: number;
+    contributions: Contribution[];
+  } | null;
+}
+
+export interface Recommendation {
+  restaurant_id: number;
+  name: string;
+  cuisine: string;
+  address: string;
+  rating: number;
+  reviews_rating: number;
+  review_count: number;
+  score: number;
+  reason: string;
+}

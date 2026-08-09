@@ -25,7 +25,7 @@ test("driver receives assignment notification and starts delivery", async ({
   await customer.getByLabel("Email").fill("customer@foodai.com");
   await customer.getByLabel("Password").fill("password123");
   await customer.getByRole("button", { name: "Log in" }).click();
-  await customer.getByText("Dosa Plaza").click();
+  await customer.getByText("Dosa Plaza").first().click();
   await customer.getByRole("button", { name: "ADD" }).first().click();
   await customer.getByRole("link", { name: "View cart →" }).click();
   await customer.getByRole("button", { name: /Place.*order/ }).click();

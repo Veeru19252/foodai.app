@@ -6,15 +6,31 @@ import { useParams } from "next/navigation";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import StatusBadge from "@/components/StatusBadge";
 import TrackingMap from "@/components/TrackingMap";
-import { trackingApi, WS_URL } from "@/lib/api";
+import { mlApi, trackingApi, WS_URL } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import type { TrackingState } from "@/lib/types";
+import type { OrderPrediction, TrackingState } from "@/lib/types";
+
+const FEATURE_LABELS: Record<string, string> = {
+  distance_km: "Distance",
+  prep_time_min: "Prep time",
+  hour_of_day: "Time of day",
+  day_of_week: "Day of week",
+  is_weekend: "Weekend",
+  traffic_factor: "Traffic",
+  zone_A: "Zone A",
+  zone_B: "Zone B",
+  zone_C: "Zone C",
+  zone_D: "Zone D",
+  zone_E: "Zone E",
+};
 
 export default function TrackingPage() {
   const params = useParams<{ orderId: string }>();
   const orderId = Number(params.orderId);
   const { user } = useAuth();
   const [state, setState] = useState<TrackingState | null>(null);
+  const [prediction, setPrediction] = useState<OrderPrediction | null>(null);
+  const [showExplain, setShowExplain] = useState(false);
   const [error, setError] = useState("");
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -39,6 +55,15 @@ export default function TrackingPage() {
         setError(err instanceof Error ? err.message : "Failed to load tracking")
       );
   }, [orderId, applyState]);
+
+  // Fetch the ML prediction + SHAP explanation for the "Why this ETA?" panel.
+  useEffect(() => {
+    if (!user) return;
+    mlApi
+      .orderPrediction(orderId)
+      .then((pred) => setPrediction(pred))
+      .catch(() => setPrediction(null)); // quietly hide the panel on any error
+  }, [orderId, user]);
 
   // Open the live WebSocket channel for this order.
   useEffect(() => {
@@ -153,6 +178,34 @@ export default function TrackingPage() {
         </div>
       </div>
 
+      {prediction && prediction.eta_min != null && (
+        <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-4">
+          <button
+            type="button"
+            onClick={() => setShowExplain((v) => !v)}
+            className="flex w-full items-center justify-between text-left"
+          >
+            <span className="text-sm font-semibold text-brand-700">
+              Why this ETA? <span className="text-xs font-normal text-gray-500">(AI explainability)</span>
+            </span>
+            <span className="text-gray-400">{showExplain ? "▲" : "▼"}</span>
+          </button>
+
+          {showExplain && (
+            <div className="mt-3">
+              {prediction.explanation ? (
+                <ExplainPanel prediction={prediction} />
+              ) : (
+                <p className="text-sm text-gray-500">
+                  The explainer model isn&apos;t available right now — the ETA
+                  is still the ML model&apos;s best estimate.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-gray-200">
         <div
           className="h-full rounded-full bg-brand-600 transition-all"
@@ -178,5 +231,55 @@ export default function TrackingPage() {
         </Link>
       </div>
     </ProtectedRoute>
+  );
+}
+
+function ExplainPanel({ prediction }: { prediction: OrderPrediction }) {
+  const contributions = prediction.explanation?.contributions ?? [];
+  const visible = contributions
+    .filter((c) => !c.feature.startsWith("zone_") || c.value === 1)
+    .slice(0, 5);
+  const maxAbs = Math.max(
+    1,
+    ...visible.map((c) => Math.abs(c.shap))
+  );
+
+  return (
+    <div>
+      <p className="mb-3 text-sm text-gray-600">
+        The model scores <strong>11 factors</strong> (distance, prep time, time
+        of day, weekend, traffic and your delivery zone) against historical
+        deliveries. These are the biggest influences on the{" "}
+        <strong>~{Math.ceil(prediction.eta_min ?? 0)} min</strong> estimate:
+      </p>
+      <div className="space-y-2">
+        {visible.map((c) => {
+          const label = FEATURE_LABELS[c.feature] ?? c.feature;
+          const width = Math.round((Math.abs(c.shap) / maxAbs) * 100);
+          const slower = c.shap > 0;
+          return (
+            <div key={c.feature} className="flex items-center gap-3">
+              <div className="w-32 shrink-0 text-xs text-gray-500">{label}</div>
+              <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-gray-200">
+                <div
+                  className={
+                    slower ? "h-full rounded-full bg-amber-500" : "h-full rounded-full bg-emerald-500"
+                  }
+                  style={{ width: `${width}%` }}
+                />
+              </div>
+              <div
+                className={`w-20 shrink-0 text-right text-xs font-semibold ${
+                  slower ? "text-amber-600" : "text-emerald-600"
+                }`}
+              >
+                {slower ? "+" : "−"}
+                {Math.abs(c.shap).toFixed(1)} min
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

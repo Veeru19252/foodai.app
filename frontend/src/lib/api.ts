@@ -10,9 +10,12 @@ import type {
   AdminOverview,
   AuthResponse,
   DriverBrief,
+  ForecastSeries,
   MenuItem,
   OrderBrief,
   OrderDetail,
+  OrderPrediction,
+  Recommendation,
   Restaurant,
   RestaurantOrder,
   Review,
@@ -225,6 +228,14 @@ export const reviewsApi = {
 
 export const trackingApi = {
   state: (orderId: number) => api<TrackingState>(`/tracking/${orderId}`),
+};
+
+export const mlApi = {
+  forecastSeries: (hours = 6) =>
+    api<ForecastSeries>(`/ml/forecast/series?hours=${hours}`),
+  recommendations: () => api<{ recommendations: Recommendation[]; fallback: boolean }>("/ml/recommendations"),
+  orderPrediction: (orderId: number) =>
+    api<OrderPrediction>(`/ml/order/${orderId}`),
 };
 
 export const adminApi = {

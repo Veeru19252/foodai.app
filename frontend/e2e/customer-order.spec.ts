@@ -16,7 +16,8 @@ test("customer places a multi-restaurant order and sees live tracking", async ({
   await expect(page).toHaveURL(/\/restaurants/);
 
   // 2. Browse restaurants — Spice Garden should be visible
-  await expect(page.getByText("Spice Garden")).toBeVisible();
+  //    (.first(): the AI recommendation row also shows it above the grid)
+  await expect(page.getByText("Spice Garden").first()).toBeVisible();
 
   // 3. Open Spice Garden and add two items
   await page.getByText("Spice Garden").first().click();
@@ -30,7 +31,8 @@ test("customer places a multi-restaurant order and sees live tracking", async ({
   await page.getByRole("button", { name: "Close" }).click();
 
   // 4. Add an item from a second restaurant (multi-restaurant cart)
-  await page.getByText("Dosa Plaza").click();
+  //    (.first() because "Dosa Plaza" also appears in the AI recommendation row)
+  await page.getByText("Dosa Plaza").first().click();
   await expect(
     page.getByRole("heading", { name: "Dosa Plaza" }).last()
   ).toBeVisible();
@@ -61,12 +63,18 @@ test("customer places a multi-restaurant order and sees live tracking", async ({
   await expect(page.getByText(/~?(\d+)/).first()).toBeVisible();
   await expect(page.getByText(/live updates|polling fallback/)).toBeVisible();
 
+  // 10. AI explainability panel breaks down the ETA into factors
+  await page.getByText("Why this ETA?").click();
+  await expect(page.getByText(/The model scores/)).toBeVisible();
+  // Contribution rows show signed minute impacts (e.g. "+2.3 min" / "−1.1 min")
+  await expect(page.getByText(/\d+\.\d\s*min/).first()).toBeVisible();
+
   // Capture the order id for follow-up tests
   const orderId = page.url().match(/\/tracking\/(\d+)/)?.[1];
   expect(orderId).toBeTruthy();
   test.info().annotations.push({ type: "orderId", description: orderId });
 
-  // 10. Both orders appear under "My orders"
+  // 11. Both orders appear under "My orders"
   await page.goto("/orders");
   await expect(page.getByText("Spice Garden").first()).toBeVisible();
   await expect(page.getByText("Dosa Plaza").first()).toBeVisible();

@@ -1,13 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { adminApi } from "@/lib/api";
-import type { AdminOverview } from "@/lib/types";
+import { adminApi, mlApi } from "@/lib/api";
+import type { AdminOverview, ForecastSeries } from "@/lib/types";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import StatusBadge from "@/components/StatusBadge";
 
+const ZONE_COLORS: Record<string, string> = {
+  A: "bg-brand-600",
+  B: "bg-emerald-500",
+  C: "bg-amber-500",
+  D: "bg-violet-500",
+  E: "bg-sky-500",
+};
+
 export default function AdminPage() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [forecast, setForecast] = useState<ForecastSeries | null>(null);
   const [orders, setOrders] = useState<
     {
       id: number;
@@ -28,6 +37,10 @@ export default function AdminPage() {
         setError(err instanceof Error ? err.message : "Failed to load dashboard")
       );
     adminApi.orders().then(setOrders).catch(() => setOrders([]));
+    mlApi
+      .forecastSeries(6)
+      .then(setForecast)
+      .catch(() => setForecast(null));
   }, []);
 
   const statCards = overview
@@ -81,6 +94,63 @@ export default function AdminPage() {
                 </span>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {forecast && (
+        <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-5">
+          <div className="mb-1 flex items-center justify-between">
+            <h2 className="font-semibold">Demand forecast (next 6 hours)</h2>
+            <span className="text-xs text-gray-400">
+              AI · XGBoost demand model
+            </span>
+          </div>
+          <p className="mb-4 text-xs text-gray-500">
+            Predicted orders per delivery zone, per hour.
+            {forecast.fallback &&
+              " (using the moving-average fallback — the trained model is unavailable)"}
+          </p>
+
+          <div className="space-y-2">
+            {forecast.series.map((item) => {
+              const maxTotal = Math.max(
+                1,
+                ...forecast.series.map((s) =>
+                  Object.values(s.zones).reduce((a, b) => a + b, 0)
+                )
+              );
+              const total = Object.values(item.zones).reduce((a, b) => a + b, 0);
+              return (
+                <div key={item.label} className="flex items-center gap-3">
+                  <div className="w-14 shrink-0 text-right text-xs text-gray-500">
+                    {item.label}
+                  </div>
+                  <div className="flex h-6 flex-1 overflow-hidden rounded-full bg-gray-100">
+                    {Object.entries(item.zones).map(([zone, count]) => (
+                      <div
+                        key={zone}
+                        className={`${ZONE_COLORS[zone] ?? "bg-gray-400"} h-full`}
+                        style={{ width: `${(count / maxTotal) * 100}%` }}
+                        title={`Zone ${zone}: ${count}`}
+                      />
+                    ))}
+                  </div>
+                  <div className="w-14 shrink-0 text-xs font-semibold text-gray-600">
+                    {total.toFixed(1)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-3">
+            {Object.entries(ZONE_COLORS).map(([zone, color]) => (
+              <span key={zone} className="flex items-center gap-1.5 text-xs text-gray-500">
+                <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
+                Zone {zone}
+              </span>
+            ))}
           </div>
         </div>
       )}

@@ -10,6 +10,7 @@ of erroring — the same pattern the legacy app already uses.
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import eta_service
@@ -18,7 +19,7 @@ import forecast_service
 import tracking
 
 from backend.db import get_db
-from backend.models import Order, User
+from backend.models import Order, Restaurant, Review, User
 from backend import security
 from backend.tracking_state import delivery_end, order_route
 
@@ -114,6 +115,110 @@ def get_forecast(
         "zones": zones,
         "fallback": forecast_service.load_model() is None,
     }
+
+
+@router.get("/forecast/series")
+def get_forecast_series(
+    hours: int = Query(6, ge=1, le=24),
+    user: User = Depends(security.get_current_user),
+):
+    """Per-zone demand forecast for the next ``hours`` hours (admin dashboard)."""
+    from datetime import datetime, timedelta
+
+    now = datetime.now()
+    prev_counts = {zone: 1 for zone in "ABCDE"}
+    series = []
+    for offset in range(hours):
+        ts = now + timedelta(hours=offset)
+        zones = forecast_service.forecast_all_zones(
+            hour=ts.hour,
+            day_of_week=ts.weekday(),
+            is_weekend=1 if ts.weekday() in (5, 6) else 0,
+            prev_counts_by_zone=prev_counts,
+        )
+        series.append(
+            {
+                "hour": ts.hour,
+                "label": f"{ts.hour:02d}:00",
+                "zones": {zone: round(count, 1) for zone, count in zones.items()},
+            }
+        )
+    return {"series": series, "fallback": forecast_service.load_model() is None}
+
+
+@router.get("/recommendations")
+def get_recommendations(
+    user: User = Depends(security.require_roles("customer")),
+    db: Session = Depends(get_db),
+):
+    """Personalized restaurant recommendations from the customer's order history.
+
+    Scores every restaurant by: base rating (45%), cuisine affinity from past
+    orders (30%), familiarity (15%) and review popularity (10%). Returns the
+    top 4 with a human-readable reason. ``fallback`` is true when the customer
+    has no order history (frontend hides the row).
+    """
+    from collections import Counter
+
+    orders = db.query(Order).filter(Order.customer_id == user.id).all()
+    restaurants = db.query(Restaurant).all()
+    if not restaurants:
+        return {"recommendations": [], "fallback": True}
+
+    ordered = Counter(o.restaurant_id for o in orders if o.restaurant_id)
+    cuisine_orders = Counter(
+        r.cuisine for o in orders for r in restaurants if r.id == o.restaurant_id
+    )
+    total_orders = max(1, len(orders))
+
+    review_rows = (
+        db.query(
+            Review.restaurant_id, func.avg(Review.rating), func.count(Review.id)
+        )
+        .group_by(Review.restaurant_id)
+        .all()
+    )
+    review_map = {
+        rid: (round(avg or 0.0, 1), count) for rid, avg, count in review_rows
+    }
+
+    scored = []
+    for r in restaurants:
+        order_count = ordered.get(r.id, 0)
+        cuisine_match = cuisine_orders.get(r.cuisine, 0) / total_orders
+        base = (r.rating or 0.0) / 5.0
+        reviews_rating, review_count = review_map.get(r.id, (0.0, 0))
+        popularity = (reviews_rating / 5.0) * 0.5 if review_count else 0.0
+        familiarity = min(1.0, order_count / 2.0)
+        score = (
+            0.45 * base + 0.30 * cuisine_match + 0.15 * familiarity + 0.10 * popularity
+        )
+
+        if order_count > 0:
+            reason = f"You've ordered here {order_count}×"
+        elif cuisine_match > 0.2:
+            reason = f"You like {r.cuisine} food"
+        elif review_count > 0:
+            reason = f"{review_count} customer review{'s' if review_count != 1 else ''}"
+        else:
+            reason = "Popular in your area"
+
+        scored.append(
+            {
+                "restaurant_id": r.id,
+                "name": r.name,
+                "cuisine": r.cuisine,
+                "address": r.address,
+                "rating": round(r.rating or 0.0, 2),
+                "reviews_rating": reviews_rating,
+                "review_count": review_count,
+                "score": round(score, 3),
+                "reason": reason,
+            }
+        )
+
+    scored.sort(key=lambda item: item["score"], reverse=True)
+    return {"recommendations": scored[:4], "fallback": len(orders) == 0}
 
 
 @router.get("/order/{order_id}")

@@ -225,6 +225,50 @@ def test_ml_explain(client):
         assert len(body["explanation"]["contributions"]) == 11
 
 
+def test_ml_forecast_series(client):
+    token = login(client, "customer@foodai.com")["access_token"]
+    resp = client.get(
+        "/ml/forecast/series?hours=3",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["series"]) == 3
+    for item in body["series"]:
+        assert "label" in item
+        assert set(item["zones"]) == {"A", "B", "C", "D", "E"}
+
+
+def test_ml_recommendations(client):
+    # customer@foodai.com has order history by this point -> real scores.
+    token = login(client, "customer@foodai.com")["access_token"]
+    resp = client.get("/ml/recommendations", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["fallback"] is False
+    assert 1 <= len(body["recommendations"]) <= 4
+    rec = body["recommendations"][0]
+    assert rec["name"]
+    assert rec["reason"]
+    assert "score" in rec
+
+    # A brand-new customer without orders degrades to fallback.
+    new_token = login(client, "test-user@example.com")["access_token"]
+    resp = client.get(
+        "/ml/recommendations", headers={"Authorization": f"Bearer {new_token}"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["fallback"] is True
+
+    # Owner accounts are not customers.
+    owner_token = login(client, "spice@foodai.com")["access_token"]
+    resp = client.get(
+        "/ml/recommendations", headers={"Authorization": f"Bearer {owner_token}"}
+    )
+    assert resp.status_code == 403
+
+
+
 def test_admin_overview_guarded(client):
     token = login(client, "customer@foodai.com")["access_token"]
     assert client.get("/admin/overview", headers={"Authorization": f"Bearer {token}"}).status_code == 403
