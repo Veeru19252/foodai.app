@@ -675,7 +675,10 @@ def show_customer_tracking(user) -> None:
     orders = get_orders_for_customer(conn, user[0])
     order = next(
         (o for o in orders if o[2] == "OUT_FOR_DELIVERY"),
-        next((o for o in orders if o[2] == "DELIVERED"), None),
+        next(
+            (o for o in orders if o[2] in ("PLACED", "CONFIRMED", "PREPARING")),
+            next((o for o in orders if o[2] == "DELIVERED"), None),
+        ),
     )
     if order is None:
         conn.close()
@@ -688,16 +691,14 @@ def show_customer_tracking(user) -> None:
 
     delivery = get_assigned_delivery_for_order(conn, order_id)
     conn.close()
-    if delivery is None or delivery[0] is None:
-        st.info("Your order is being processed — a delivery partner will be assigned soon.")
-        return
+    delivery_id = delivery[0] if delivery is not None else None
+    pickup_time = delivery[2] if delivery is not None else None
+    delivered_time = delivery[3] if delivery is not None else None
 
     # Auto-refresh every 2.5s so the map + ETA move without user interaction.
     # Must be called at most once per page — it lives only on this page, with a
     # key distinct from the delivery panel's.
     st_autorefresh(interval=2500, key="customer_tracking_autorefresh")
-
-    delivery_id, _driver_id, pickup_time, delivered_time = delivery
 
     # Resolve the restaurant id for route coordinates.
     conn = get_connection()
@@ -715,7 +716,11 @@ def show_customer_tracking(user) -> None:
 
     # Rider position: use the latest logged GPS point, else the restaurant.
     conn = get_connection()
-    latest = get_latest_trip_position(conn, delivery_id)
+    latest = (
+        get_latest_trip_position(conn, delivery_id)
+        if delivery_id is not None
+        else None
+    )
     conn.close()
     rider_pos = (latest[0], latest[1]) if latest is not None else start
 
@@ -766,9 +771,12 @@ def show_customer_tracking(user) -> None:
             st.write(f"Delivered at {delivered_time}")
         return
 
-    # Live trip: progress is elapsed time over the full trip estimate. SQLite
-    # datetime('now') is UTC in 'YYYY-MM-DD HH:MM:SS'; parse as UTC so the
-    # epoch is directly comparable to time.time().
+    # ETA: while the rider is en route, progress is elapsed time over the full
+    # trip estimate. SQLite datetime('now') is UTC in 'YYYY-MM-DD HH:MM:SS';
+    # parse as UTC so the epoch is directly comparable to time.time().
+    # Before pickup (no pickup_time yet) we still show the AI prediction for
+    # the full trip from the restaurant, so an ordered customer always sees an
+    # expected delivery time.
     if pickup_time:
         pickup_ts = datetime.strptime(pickup_time, "%Y-%m-%d %H:%M:%S").replace(
             tzinfo=timezone.utc
@@ -780,38 +788,41 @@ def show_customer_tracking(user) -> None:
             if total_seconds > 0
             else 1.0
         )
-        eta_min, eta_source = eta_service.best_eta(route, progress, restaurant_id)
-        st.metric("Estimated arrival", tracking.format_eta(eta_min))
-        st.caption("AI-predicted ETA" if eta_source == "ml" else "Estimated ETA")
+    else:
+        progress = 0.0
 
-        with st.expander("Why this ETA?"):
-            explanation = explain_service.explain_eta(
-                eta_service.features_for_order(
-                    restaurant_id,
-                    distance_km=tracking.route_length_km(route),
-                    prep_time_min=15,
-                )
+    eta_min, eta_source = eta_service.best_eta(route, progress, restaurant_id)
+    st.metric("Estimated arrival", tracking.format_eta(eta_min))
+    st.caption("AI-predicted ETA" if eta_source == "ml" else "Estimated ETA")
+
+    with st.expander("Why this ETA?"):
+        explanation = explain_service.explain_eta(
+            eta_service.features_for_order(
+                restaurant_id,
+                distance_km=tracking.route_length_km(route),
+                prep_time_min=15,
             )
-            if explanation is None:
-                st.caption("Model explanation unavailable.")
-            else:
-                top = explanation["contributions"][:8]
-                import pandas as pd
-                df = pd.DataFrame(top)
-                df["color"] = df["shap"].apply(lambda v: "green" if v >= 0 else "red")
-                fig = px.bar(
-                    df,
-                    x="shap",
-                    y="feature",
-                    orientation="h",
-                    color="color",
-                    color_discrete_map={"green": "#2E7D32", "red": "#C62828"},
-                    title="Feature contributions to the ETA",
-                    labels={"shap": "Minutes contribution", "feature": ""},
-                )
-                fig.update_layout(showlegend=False, height=320)
-                st.plotly_chart(fig, use_container_width=True)
-                st.caption(f"Base prediction: {explanation['base_value']:.1f} min")
+        )
+        if explanation is None:
+            st.caption("Model explanation unavailable.")
+        else:
+            top = explanation["contributions"][:8]
+            import pandas as pd
+            df = pd.DataFrame(top)
+            df["color"] = df["shap"].apply(lambda v: "green" if v >= 0 else "red")
+            fig = px.bar(
+                df,
+                x="shap",
+                y="feature",
+                orientation="h",
+                color="color",
+                color_discrete_map={"green": "#2E7D32", "red": "#C62828"},
+                title="Feature contributions to the ETA",
+                labels={"shap": "Minutes contribution", "feature": ""},
+            )
+            fig.update_layout(showlegend=False, height=320)
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(f"Base prediction: {explanation['base_value']:.1f} min")
 
 
 # ---------- admin dashboard ----------
