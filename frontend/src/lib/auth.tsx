@@ -13,6 +13,7 @@ import type { User } from "@/lib/types";
 
 interface AuthContextValue {
   user: User | null;
+  token: string | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<User>;
   register: (
@@ -28,10 +29,13 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setUser(loadUser());
+    const storedUser = loadUser();
+    setUser(storedUser);
+    setToken(typeof window !== "undefined" ? window.localStorage.getItem("foodai_access_token") : null);
     setLoading(false);
   }, []);
 
@@ -39,6 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const data = await authApi.login(email, password);
     saveAuth(data);
     setUser(data.user);
+    setToken(data.access_token);
     return data.user;
   }, []);
 
@@ -47,6 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await authApi.register(name, email, password, role);
       saveAuth(data);
       setUser(data.user);
+      setToken(data.access_token);
       return data.user;
     },
     []
@@ -55,11 +61,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(() => {
     apiLogout();
     setUser(null);
+    setToken(null);
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, login, register, logout }),
-    [user, loading, login, register, logout]
+    () => ({ user, token, loading, login, register, logout }),
+    [user, token, loading, login, register, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

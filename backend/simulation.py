@@ -59,6 +59,22 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# Separate channel namespace for per-user notifications (e.g. drivers being
+# assigned a delivery). Channels are string keys like "user:7".
+notifications_manager = ConnectionManager()
+
+# Set during app startup so sync request handlers (which run in worker
+# threads) can publish onto the main event loop safely.
+MAIN_LOOP: Optional[asyncio.AbstractEventLoop] = None
+
+
+def publish_sync(manager_: ConnectionManager, channel, message: dict) -> None:
+    """Publish a message from a worker thread onto the main event loop."""
+    if MAIN_LOOP is not None:
+        asyncio.run_coroutine_threadsafe(
+            manager_.publish(channel, message), MAIN_LOOP
+        )
+
 
 def _advance_delivery(db, delivery: Delivery) -> Optional[dict]:
     """Advance one delivery one tick; return an event dict to publish (or None)."""

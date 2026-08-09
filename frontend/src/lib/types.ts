@@ -20,6 +20,8 @@ export interface Restaurant {
   address: string;
   cuisine: string;
   rating: number;
+  review_count: number;
+  reviews_rating: number;
 }
 
 export interface MenuItem {
@@ -31,9 +33,27 @@ export interface MenuItem {
 
 export interface CartLine {
   menu_item_id: number;
+  restaurant_id: number;
+  restaurant_name: string;
   name: string;
   price: number;
   quantity: number;
+}
+
+export interface CartGroup {
+  restaurant_id: number;
+  restaurant_name: string;
+  items: CartLine[];
+  subtotal: number;
+}
+
+export interface Review {
+  id: number;
+  restaurant_id: number;
+  user_name: string;
+  rating: number;
+  comment?: string | null;
+  created_at: string;
 }
 
 export interface OrderBrief {
@@ -52,6 +72,8 @@ export interface RestaurantOrder {
   status: string;
   total: number;
   created_at: string;
+  assigned_driver_id?: number | null;
+  assigned_driver_name?: string | null;
 }
 
 export interface OrderItemOut {

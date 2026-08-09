@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { catalogApi } from "@/lib/api";
 import { useCart } from "@/lib/cart";
@@ -14,7 +14,7 @@ export default function RestaurantsPage() {
   const [cuisine, setCuisine] = useState("All");
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<Restaurant | null>(null);
-  const { count, restaurantId, items } = useCart();
+  const { count, items } = useCart();
 
   useEffect(() => {
     catalogApi
@@ -33,10 +33,7 @@ export default function RestaurantsPage() {
       );
   }, [cuisine]);
 
-  const cartSummary = useMemo(
-    () => (restaurantId ? items : []),
-    [items, restaurantId]
-  );
+  const cartSummary = items;
 
   return (
     <ProtectedRoute role="customer">
@@ -97,6 +94,12 @@ export default function RestaurantsPage() {
             </div>
             <p className="text-sm text-gray-500">{r.cuisine}</p>
             <p className="mt-1 text-xs text-gray-400">{r.address}</p>
+            {r.review_count > 0 && (
+              <p className="mt-2 text-xs text-gray-500">
+                ⭐ {r.reviews_rating.toFixed(1)} · {r.review_count} review
+                {r.review_count === 1 ? "" : "s"}
+              </p>
+            )}
           </button>
         ))}
       </div>

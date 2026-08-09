@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from backend import security
 from backend.db import SessionLocal, get_db
 from backend.models import Delivery, Order, User
-from backend.simulation import manager
+from backend.simulation import manager, notifications_manager
 from backend.tracking_state import build_tracking_state
 
 router = APIRouter(prefix="/tracking", tags=["tracking"])
@@ -115,3 +115,47 @@ async def ws_tracking(websocket: WebSocket, order_id: int):
         pass
     finally:
         await manager.unsubscribe(order_id, websocket)
+
+
+@ws_router.websocket("/ws/notifications")
+async def ws_notifications(websocket: WebSocket):
+    """Per-user notification channel (e.g. drivers receive delivery_assigned
+    events). Auth via ``?token=`` like the tracking socket."""
+    token = websocket.query_params.get("token")
+    payload = security.decode_token(token) if token else None
+    if payload is None:
+        await websocket.close(code=4401)
+        return
+
+    loop = asyncio.get_running_loop()
+
+    def _load_user():
+        db = SessionLocal()
+        try:
+            return db.query(User).filter(User.id == int(payload["sub"])).first()
+        finally:
+            db.close()
+
+    user = await loop.run_in_executor(None, _load_user)
+    if user is None:
+        await websocket.close(code=4401)
+        return
+
+    channel = f"user:{user.id}"
+    await websocket.accept()
+    await notifications_manager.subscribe(channel, websocket)
+    await websocket.send_json({"type": "connected", "channel": channel})
+    try:
+        while True:
+            message = await websocket.receive_text()
+            if message:
+                try:
+                    data = json.loads(message)
+                    if data.get("type") == "ping":
+                        await websocket.send_json({"type": "pong"})
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await notifications_manager.unsubscribe(channel, websocket)

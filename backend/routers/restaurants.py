@@ -9,22 +9,43 @@ flow; order creation itself stays protected).
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.db import get_db
-from backend.models import MenuItem, Restaurant
+from backend.models import MenuItem, Restaurant, Review
 from backend.schemas import MenuItemOut
 
 router = APIRouter(prefix="/restaurants", tags=["restaurants"])
 
 
-def _restaurant_payload(restaurant: Restaurant) -> dict:
+def _review_summary(db: Session) -> dict:
+    """One grouped query: average user rating + review count per restaurant."""
+    rows = (
+        db.query(
+            Review.restaurant_id,
+            func.avg(Review.rating),
+            func.count(Review.id),
+        )
+        .group_by(Review.restaurant_id)
+        .all()
+    )
+    return {
+        r_id: {"reviews_rating": round(avg or 0.0, 1), "review_count": count}
+        for r_id, avg, count in rows
+    }
+
+
+def _restaurant_payload(restaurant: Restaurant, summary: dict) -> dict:
+    review = summary.get(restaurant.id, {"reviews_rating": 0.0, "review_count": 0})
     return {
         "id": restaurant.id,
         "name": restaurant.name,
         "address": restaurant.address,
         "cuisine": restaurant.cuisine,
         "rating": round(restaurant.rating or 0.0, 2),
+        "reviews_rating": review["reviews_rating"],
+        "review_count": review["review_count"],
     }
 
 
@@ -42,7 +63,8 @@ def list_restaurants(
             Restaurant.name.ilike(f"%{q}%") | Restaurant.cuisine.ilike(f"%{q}%")
         )
     restaurants = query.order_by(Restaurant.rating.desc()).all()
-    return [_restaurant_payload(r) for r in restaurants]
+    summary = _review_summary(db)
+    return [_restaurant_payload(r, summary) for r in restaurants]
 
 
 @router.get("/cuisines")

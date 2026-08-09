@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { useCart } from "@/lib/cart";
+import NotificationBell from "@/components/NotificationBell";
 
 const ROLE_HOME: Record<string, string> = {
   customer: "/restaurants",
@@ -74,6 +75,7 @@ export default function Navbar() {
 
           {user ? (
             <div className="flex items-center gap-3">
+              {user.role !== "customer" && <NotificationBell />}
               <span className="hidden text-gray-500 sm:inline">
                 {user.name} ({user.role})
               </span>

@@ -101,6 +101,14 @@ class UpdateOrderStatusRequest(BaseModel):
     status: str
 
 
+class BatchOrderRequest(BaseModel):
+    orders: List[CreateOrderRequest] = Field(min_length=1)
+
+
+class BatchOrderResponse(BaseModel):
+    orders: List[OrderOut]
+
+
 class AssignDeliveryRequest(BaseModel):
     driver_id: int
 
@@ -158,3 +166,20 @@ class ForecastRequest(BaseModel):
 class ForecastResponse(BaseModel):
     by_zone: dict
     source: str
+
+
+# ---- reviews ----
+
+class ReviewCreate(BaseModel):
+    order_id: int
+    rating: int = Field(ge=1, le=5)
+    comment: Optional[str] = None
+
+
+class ReviewOut(BaseModel):
+    id: int
+    restaurant_id: int
+    user_name: str
+    rating: int
+    comment: Optional[str]
+    created_at: datetime

@@ -17,9 +17,11 @@ test("restaurant dispatches an order and admin sees the dashboard", async ({
   await customer.getByText("Dosa Plaza").click();
   await customer.getByRole("button", { name: "ADD" }).first().click();
   await customer.getByRole("link", { name: "View cart →" }).click();
-  await customer.getByRole("button", { name: "Place order" }).click();
+  await customer.getByRole("button", { name: /Place.*order/ }).click();
   await expect(customer).toHaveURL(/\/tracking\/\d+/);
   const orderUrl = customer.url();
+  const orderId = orderUrl.match(/\/tracking\/(\d+)/)?.[1];
+  expect(orderId).toBeTruthy();
 
   // Restaurant logs in and sees the order in its queue.
   const restaurantContext = await browser.newContext();
@@ -30,14 +32,21 @@ test("restaurant dispatches an order and admin sees the dashboard", async ({
   await restaurant.getByRole("button", { name: "Log in" }).click();
   await expect(restaurant).toHaveURL(/\/restaurant\/orders/);
   await expect(restaurant.getByText("Restaurant dashboard")).toBeVisible();
-  await expect(restaurant.getByText("Demo Customer").first()).toBeVisible();
 
-  // Confirm → prepare → assign & dispatch.
-  await restaurant.getByRole("button", { name: /Mark confirmed/i }).first().click();
-  await expect(restaurant.getByText("PREPARING").first()).toBeVisible({ timeout: 10_000 });
-  await restaurant.getByRole("button", { name: /Mark preparing/i }).first().click();
-  await restaurant.getByRole("button", { name: /Assign & dispatch/i }).first().click();
-  await expect(restaurant.getByText("Dispatched").first()).toBeVisible({ timeout: 10_000 });
+  const orderCard = restaurant.getByTestId(`restaurant-order-${orderId}`);
+  await expect(orderCard).toBeVisible();
+
+  // Confirm → prepare → pick a driver → assign → dispatch.
+  await orderCard.getByRole("button", { name: /Mark confirmed/i }).click();
+  await expect(orderCard.getByText("PREPARING")).toBeVisible({ timeout: 10_000 });
+  await orderCard.getByRole("button", { name: /Mark preparing/i }).click();
+  const driverSelect = orderCard.getByLabel("Select delivery driver");
+  await expect(driverSelect).toBeVisible();
+  await driverSelect.selectOption({ index: 1 });
+  await orderCard.getByRole("button", { name: /Assign driver/i }).click();
+  await expect(orderCard.getByText(/Assigned to/)).toBeVisible({ timeout: 10_000 });
+  await orderCard.getByRole("button", { name: "Dispatch" }).click();
+  await expect(orderCard.getByText("Dispatched")).toBeVisible({ timeout: 10_000 });
 
   // Customer tracking page now reflects OUT_FOR_DELIVERY.
   await customer.goto(orderUrl);

@@ -12,7 +12,7 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from backend import security
+from backend import security, simulation
 from backend.db import get_db
 from backend.models import (
     Delivery,
@@ -26,6 +26,8 @@ from backend.models import (
 )
 from backend.schemas import (
     AssignDeliveryRequest,
+    BatchOrderRequest,
+    BatchOrderResponse,
     CreateOrderRequest,
     OrderItemOut,
     OrderOut,
@@ -33,6 +35,8 @@ from backend.schemas import (
     PromoApplyResponse,
     UpdateOrderStatusRequest,
 )
+from backend.simulation import publish_sync
+from backend.security import get_current_user
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -166,6 +170,8 @@ def restaurant_orders(user: User = Depends(restaurant_or_admin), db: Session = D
             "status": o.status,
             "total": round(o.total, 2),
             "created_at": o.created_at,
+            "assigned_driver_id": o.assigned_driver.id if o.assigned_driver else None,
+            "assigned_driver_name": o.assigned_driver.name if o.assigned_driver else None,
         }
         for o in orders
     ]
@@ -181,7 +187,7 @@ def driver_orders(user: User = Depends(security.require_roles("delivery")), db: 
     )
     result = []
     for d in deliveries:
-        order = d.order
+        order = db.query(Order).filter(Order.id == d.order_id).first()
         if order is None:
             continue
         result.append({
@@ -196,12 +202,8 @@ def driver_orders(user: User = Depends(security.require_roles("delivery")), db: 
     return result
 
 
-@router.post("", response_model=OrderOut, status_code=201)
-def create_order(
-    payload: CreateOrderRequest,
-    user: User = Depends(customer_only),
-    db: Session = Depends(get_db),
-):
+def _create_single_order(db: Session, user: User, payload: CreateOrderRequest) -> Order:
+    """Create one order for a restaurant group (shared by single + batch)."""
     restaurant = db.query(Restaurant).filter(Restaurant.id == payload.restaurant_id).first()
     if restaurant is None:
         raise HTTPException(status_code=404, detail="Restaurant not found.")
@@ -249,7 +251,27 @@ def create_order(
         promo.times_used += 1
     db.commit()
     db.refresh(order)
-    return _order_detail(order)
+    return order
+
+
+@router.post("", response_model=OrderOut, status_code=201)
+def create_order(
+    payload: CreateOrderRequest,
+    user: User = Depends(customer_only),
+    db: Session = Depends(get_db),
+):
+    return _order_detail(_create_single_order(db, user, payload))
+
+
+@router.post("/batch", response_model=BatchOrderResponse, status_code=201)
+def create_orders_batch(
+    payload: BatchOrderRequest,
+    user: User = Depends(customer_only),
+    db: Session = Depends(get_db),
+):
+    """Create one order per restaurant group in a single cart (Swiggy-style)."""
+    orders = [_create_single_order(db, user, req) for req in payload.orders]
+    return BatchOrderResponse(orders=[_order_detail(o) for o in orders])
 
 
 @router.get("/{order_id}")
@@ -281,18 +303,44 @@ def get_order(
 def update_order_status(
     order_id: int,
     payload: UpdateOrderStatusRequest,
-    user: User = Depends(restaurant_or_admin),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    """Advance an order's status. Restaurant owners (and admins) can confirm/
+    dispatch; the assigned driver can start their trip (OUT_FOR_DELIVERY)."""
     if payload.status not in VALID_ORDER_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {payload.status}")
     order = db.query(Order).filter(Order.id == order_id).first()
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found.")
-    if user.role == "restaurant" and order.restaurant_id not in [
-        r.id for r in user.restaurants
-    ]:
-        raise HTTPException(status_code=403, detail="Not your restaurant's order.")
+
+    is_restaurant_owner = (
+        user.role == "restaurant"
+        and any(r.id == order.restaurant_id for r in user.restaurants)
+    )
+    is_admin = user.role == "admin"
+    is_assigned_driver = (
+        user.role == "delivery"
+        and db.query(Delivery).filter(
+            Delivery.order_id == order_id, Delivery.driver_id == user.id
+        ).first() is not None
+    )
+
+    if payload.status == "OUT_FOR_DELIVERY":
+        # Only the restaurant owner, admin, or the assigned driver may dispatch.
+        if not (is_restaurant_owner or is_admin or is_assigned_driver):
+            raise HTTPException(status_code=403, detail="You cannot dispatch this order.")
+        if not is_assigned_driver and not db.query(Delivery).filter(
+            Delivery.order_id == order_id
+        ).first():
+            raise HTTPException(status_code=400, detail="Assign a driver before dispatching.")
+    elif payload.status in ("CONFIRMED", "PREPARING"):
+        if not (is_restaurant_owner or is_admin):
+            raise HTTPException(status_code=403, detail="Only the restaurant can update this order.")
+    else:
+        if not (is_restaurant_owner or is_admin):
+            raise HTTPException(status_code=403, detail="You cannot update this order.")
+
     order.status = payload.status
     # Starting the trip stamps pickup_time so the simulation engine advances
     # the rider along the route (mirrors the legacy driver "Start Delivery").
@@ -300,6 +348,27 @@ def update_order_status(
         delivery = db.query(Delivery).filter(Delivery.order_id == order.id).first()
         if delivery is not None and delivery.pickup_time is None:
             delivery.pickup_time = datetime.utcnow()
+    db.commit()
+    return _order_detail(order)
+
+
+@router.post("/{order_id}/cancel")
+def cancel_order(
+    order_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Customer (or admin) cancels an order that hasn't left the kitchen yet."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found.")
+    if user.role == "customer" and order.customer_id != user.id:
+        raise HTTPException(status_code=403, detail="You cannot cancel this order.")
+    if user.role not in ("customer", "admin"):
+        raise HTTPException(status_code=403, detail="You cannot cancel this order.")
+    if order.status in ("DELIVERED", "CANCELLED", "OUT_FOR_DELIVERY"):
+        raise HTTPException(status_code=400, detail=f"Order cannot be cancelled once {order.status}.")
+    order.status = "CANCELLED"
     db.commit()
     return _order_detail(order)
 
@@ -314,6 +383,10 @@ def assign_delivery(
     order = db.query(Order).filter(Order.id == order_id).first()
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found.")
+    if user.role == "restaurant" and order.restaurant_id not in [
+        r.id for r in user.restaurants
+    ]:
+        raise HTTPException(status_code=403, detail="Not your restaurant's order.")
     driver = db.query(User).filter(User.id == payload.driver_id, User.role == "delivery").first()
     if driver is None:
         raise HTTPException(status_code=400, detail="Driver not found.")
@@ -325,4 +398,16 @@ def assign_delivery(
     order.delivery_id = payload.driver_id
     db.commit()
     db.refresh(delivery)
+    # Notify the driver in real time over their notification channel.
+    publish_sync(
+        simulation.notifications_manager,
+        f"user:{driver.id}",
+        {
+            "type": "delivery_assigned",
+            "order_id": order.id,
+            "restaurant_name": order.restaurant.name if order.restaurant else "Restaurant",
+            "customer_name": order.customer.name if order.customer else "Customer",
+            "message": f"New delivery assigned for order #{order.id}",
+        },
+    )
     return {"delivery_id": delivery.id, "message": "Delivery assigned."}

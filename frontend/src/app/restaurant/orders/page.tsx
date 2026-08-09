@@ -15,6 +15,7 @@ const NEXT_STATUS: Record<string, string> = {
 export default function RestaurantOrdersPage() {
   const [orders, setOrders] = useState<RestaurantOrder[]>([]);
   const [drivers, setDrivers] = useState<DriverBrief[]>([]);
+  const [selectedDriver, setSelectedDriver] = useState<Record<number, number>>({});
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<number | null>(null);
 
@@ -29,15 +30,26 @@ export default function RestaurantOrdersPage() {
     load();
   }, [load]);
 
+  async function assignDriver(orderId: number) {
+    const driverId = selectedDriver[orderId];
+    if (!driverId) {
+      setError("Select a driver first.");
+      return;
+    }
+    setBusyId(orderId);
+    try {
+      await ordersApi.assign(orderId, driverId);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Assign failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function advance(orderId: number, nextStatus: string) {
     setBusyId(orderId);
     try {
-      if (nextStatus === "OUT_FOR_DELIVERY") {
-        // Pick the first available driver (demo) and assign before dispatching.
-        if (drivers.length > 0) {
-          await ordersApi.assign(orderId, drivers[0].id);
-        }
-      }
       await ordersApi.updateStatus(orderId, nextStatus);
       load();
     } catch (err) {
@@ -63,35 +75,92 @@ export default function RestaurantOrdersPage() {
         )}
         {orders.map((o) => {
           const next = NEXT_STATUS[o.status];
+          const needsDriver = next === "OUT_FOR_DELIVERY";
+          const assigned = selectedDriver[o.id] ?? o.assigned_driver_id ?? 0;
           return (
             <div
               key={o.id}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm"
+              data-testid={`restaurant-order-${o.id}`}
+              className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm"
             >
-              <div>
-                <p className="font-semibold">
-                  #{o.id} — {o.customer_name}
-                </p>
-                <p className="text-xs text-gray-500">
-                  {new Date(o.created_at).toLocaleString()}
-                </p>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold">
+                    #{o.id} — {o.customer_name}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {new Date(o.created_at).toLocaleString()}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="font-semibold">₹{o.total.toFixed(0)}</span>
+                  <StatusBadge status={o.status} />
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="font-semibold">₹{o.total.toFixed(0)}</span>
-                <StatusBadge status={o.status} />
-                {next && (
+
+              {o.assigned_driver_name && (
+                <p className="mt-2 text-xs text-gray-500">
+                  Assigned to{" "}
+                  <span className="font-semibold">{o.assigned_driver_name}</span>
+                </p>
+              )}
+
+              {needsDriver && (
+                <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-gray-100 pt-3">
+                  <select
+                    value={assigned}
+                    onChange={(e) =>
+                      setSelectedDriver((prev) => ({
+                        ...prev,
+                        [o.id]: Number(e.target.value),
+                      }))
+                    }
+                    aria-label="Select delivery driver"
+                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none"
+                  >
+                    <option value={0} disabled>
+                      Select driver…
+                    </option>
+                    {drivers.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ({d.email})
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => assignDriver(o.id)}
+                    disabled={busyId === o.id || !assigned || !!o.assigned_driver_id}
+                    className="rounded-lg border border-gray-900 px-3 py-1.5 text-sm font-semibold text-gray-900 hover:bg-gray-100 disabled:opacity-50"
+                  >
+                    {busyId === o.id ? "Assigning…" : "Assign driver"}
+                  </button>
+                  <button
+                    onClick={() => advance(o.id, "OUT_FOR_DELIVERY")}
+                    disabled={busyId === o.id || !o.assigned_driver_id}
+                    className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
+                  >
+                    Dispatch
+                  </button>
+                </div>
+              )}
+
+              {next && !needsDriver && (
+                <div className="mt-3 border-t border-gray-100 pt-3">
                   <button
                     onClick={() => advance(o.id, next)}
                     disabled={busyId === o.id}
                     className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-60"
                   >
-                    {next === "OUT_FOR_DELIVERY" ? "Assign & dispatch" : `Mark ${next.replaceAll("_", " ").toLowerCase()}`}
+                    {`Mark ${next.replaceAll("_", " ").toLowerCase()}`}
                   </button>
-                )}
-                {o.status === "OUT_FOR_DELIVERY" && (
-                  <span className="text-xs text-gray-400">Dispatched</span>
-                )}
-              </div>
+                </div>
+              )}
+
+              {o.status === "OUT_FOR_DELIVERY" && (
+                <p className="mt-2 text-xs text-gray-400">
+                  Dispatched — rider is on the way
+                </p>
+              )}
             </div>
           );
         })}

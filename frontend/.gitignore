@@ -8,6 +8,10 @@
 # production
 /build
 
+# playwright
+/test-results/
+/playwright-report/
+
 # misc
 .DS_Store
 *.pem

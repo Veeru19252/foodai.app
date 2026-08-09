@@ -15,6 +15,7 @@ import type {
   OrderDetail,
   Restaurant,
   RestaurantOrder,
+  Review,
   TrackingState,
 } from "@/lib/types";
 
@@ -164,6 +165,22 @@ export const ordersApi = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  createBatch: (
+    orders: {
+      restaurant_id: number;
+      items: { menu_item_id: number; quantity: number }[];
+      coupon_code?: string;
+      delivery_lat?: number;
+      delivery_lng?: number;
+      delivery_address?: string;
+    }[]
+  ) =>
+    api<{ orders: OrderDetail[] }>("/orders/batch", {
+      method: "POST",
+      body: JSON.stringify({ orders }),
+    }),
+  cancel: (orderId: number) =>
+    api<OrderDetail>(`/orders/${orderId}/cancel`, { method: "POST" }),
   mine: () => api<OrderBrief[]>("/orders"),
   restaurantOrders: () => api<RestaurantOrder[]>("/orders/restaurant"),
   driverOrders: () =>
@@ -194,6 +211,16 @@ export const ordersApi = {
       "/orders/promo/validate",
       { method: "POST", body: JSON.stringify({ code, order_total: orderTotal }) }
     ),
+};
+
+export const reviewsApi = {
+  create: (orderId: number, rating: number, comment?: string) =>
+    api<Review>("/reviews", {
+      method: "POST",
+      body: JSON.stringify({ order_id: orderId, rating, comment: comment || null }),
+    }),
+  forRestaurant: (restaurantId: number) =>
+    api<Review[]>(`/reviews/restaurant/${restaurantId}`),
 };
 
 export const trackingApi = {

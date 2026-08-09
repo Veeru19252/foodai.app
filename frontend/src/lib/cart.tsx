@@ -7,28 +7,26 @@ import {
   useMemo,
   useState,
 } from "react";
-import type { CartLine } from "@/lib/types";
+import type { CartGroup, CartLine } from "@/lib/types";
 
 interface CartContextValue {
   items: CartLine[];
-  restaurantId: number | null;
-  addItem: (restaurantId: number, item: CartLine) => void;
+  addItem: (restaurantId: number, restaurantName: string, item: CartLine) => void;
   removeItem: (menuItemId: number) => void;
   setQuantity: (menuItemId: number, quantity: number) => void;
   clear: () => void;
   subtotal: number;
   count: number;
+  groups: CartGroup[];
 }
 
 const CartContext = createContext<CartContextValue | undefined>(undefined);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
-  const [restaurantId, setRestaurantId] = useState<number | null>(null);
   const [items, setItems] = useState<CartLine[]>([]);
 
   const addItem = useCallback(
-    (restaurantId: number, item: CartLine) => {
-      setRestaurantId(restaurantId);
+    (restaurantId: number, restaurantName: string, item: CartLine) => {
       setItems((prev) => {
         const existing = prev.find((i) => i.menu_item_id === item.menu_item_id);
         if (existing) {
@@ -38,7 +36,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
               : i
           );
         }
-        return [...prev, { ...item, quantity: 1 }];
+        return [
+          ...prev,
+          { ...item, restaurant_id: restaurantId, restaurant_name: restaurantName, quantity: 1 },
+        ];
       });
     },
     []
@@ -60,7 +61,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const clear = useCallback(() => {
     setItems([]);
-    setRestaurantId(null);
   }, []);
 
   const subtotal = useMemo(
@@ -72,18 +72,37 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     [items]
   );
 
+  const groups = useMemo<CartGroup[]>(() => {
+    const map = new Map<number, CartGroup>();
+    for (const line of items) {
+      let group = map.get(line.restaurant_id);
+      if (!group) {
+        group = {
+          restaurant_id: line.restaurant_id,
+          restaurant_name: line.restaurant_name,
+          items: [],
+          subtotal: 0,
+        };
+        map.set(line.restaurant_id, group);
+      }
+      group.items.push(line);
+      group.subtotal += line.price * line.quantity;
+    }
+    return Array.from(map.values());
+  }, [items]);
+
   const value = useMemo(
     () => ({
       items,
-      restaurantId,
       addItem,
       removeItem,
       setQuantity,
       clear,
       subtotal,
       count,
+      groups,
     }),
-    [items, restaurantId, addItem, removeItem, setQuantity, clear, subtotal, count]
+    [items, addItem, removeItem, setQuantity, clear, subtotal, count, groups]
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

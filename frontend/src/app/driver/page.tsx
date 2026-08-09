@@ -19,6 +19,7 @@ interface DriverOrder {
 export default function DriverPage() {
   const [deliveries, setDeliveries] = useState<DriverOrder[]>([]);
   const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState<number | null>(null);
 
   const load = useCallback(() => {
     ordersApi.driverOrders().then(setDeliveries).catch((err) =>
@@ -31,6 +32,18 @@ export default function DriverPage() {
     const timer = setInterval(load, 5000);
     return () => clearInterval(timer);
   }, [load]);
+
+  async function startDelivery(orderId: number) {
+    setBusyId(orderId);
+    try {
+      await ordersApi.updateStatus(orderId, "OUT_FOR_DELIVERY");
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start delivery");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <ProtectedRoute role="delivery">
@@ -45,7 +58,7 @@ export default function DriverPage() {
       {deliveries.length === 0 && (
         <p className="py-16 text-center text-gray-400">
           No deliveries assigned yet. Restaurants will assign you when orders
-          are ready.
+          are ready — you&apos;ll get a notification.
         </p>
       )}
 
@@ -53,6 +66,7 @@ export default function DriverPage() {
         {deliveries.map((d) => (
           <div
             key={d.delivery_id}
+            data-testid={`driver-delivery-${d.order_id}`}
             className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
           >
             <div className="mb-2 flex items-center justify-between">
@@ -66,6 +80,18 @@ export default function DriverPage() {
                 ? `Picked up ${new Date(d.pickup_time).toLocaleTimeString()}`
                 : "Not picked up yet"}
             </p>
+
+            {(d.order_status === "PREPARING" ||
+              d.order_status === "CONFIRMED") && (
+              <button
+                onClick={() => startDelivery(d.order_id)}
+                disabled={busyId === d.order_id}
+                className="mt-3 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+              >
+                {busyId === d.order_id ? "Starting…" : "Start delivery"}
+              </button>
+            )}
+
             {d.order_status === "OUT_FOR_DELIVERY" && (
               <Link
                 href={`/tracking/${d.order_id}`}
@@ -73,6 +99,12 @@ export default function DriverPage() {
               >
                 Navigate
               </Link>
+            )}
+
+            {d.order_status === "DELIVERED" && (
+              <p className="mt-3 text-sm font-medium text-green-600">
+                Delivered ✓
+              </p>
             )}
           </div>
         ))}

@@ -1,10 +1,13 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Full customer journey: login → browse → add to cart → checkout with a promo
- * → place the order → live tracking page loads with the AI ETA.
+ * Full customer journey: login → browse two restaurants → build a
+ * multi-restaurant cart → checkout with a promo → place a batch order →
+ * live tracking page loads with the AI ETA.
  */
-test("customer places an order and sees live tracking", async ({ page }) => {
+test("customer places a multi-restaurant order and sees live tracking", async ({
+  page,
+}) => {
   // 1. Login as the demo customer
   await page.goto("/login");
   await page.getByLabel("Email").fill("customer@foodai.com");
@@ -15,7 +18,7 @@ test("customer places an order and sees live tracking", async ({ page }) => {
   // 2. Browse restaurants — Spice Garden should be visible
   await expect(page.getByText("Spice Garden")).toBeVisible();
 
-  // 3. Open the menu and add two items
+  // 3. Open Spice Garden and add two items
   await page.getByText("Spice Garden").first().click();
   await expect(
     page.getByRole("heading", { name: "Spice Garden" }).last()
@@ -24,22 +27,35 @@ test("customer places an order and sees live tracking", async ({ page }) => {
   await addButtons.first().click();
   await addButtons.first().click(); // qty 2 of the first item
   await page.getByRole("button", { name: "ADD" }).nth(1).click(); // second item
+  await page.getByRole("button", { name: "Close" }).click();
 
-  // 4. Go to checkout via the sticky cart bar
+  // 4. Add an item from a second restaurant (multi-restaurant cart)
+  await page.getByText("Dosa Plaza").click();
+  await expect(
+    page.getByRole("heading", { name: "Dosa Plaza" }).last()
+  ).toBeVisible();
+  await page.getByRole("button", { name: "ADD" }).first().click();
+  await page.getByRole("button", { name: "Close" }).click();
+
+  // 5. Go to checkout via the sticky cart bar
   await page.getByRole("link", { name: "View cart →" }).click();
   await expect(page).toHaveURL(/\/checkout/);
 
-  // 5. Apply a valid promo
+  // 6. The summary shows both restaurant groups
+  await expect(page.getByText("Spice Garden")).toBeVisible();
+  await expect(page.getByText("Dosa Plaza")).toBeVisible();
+
+  // 7. Apply a valid promo
   await page.getByPlaceholder("WELCOME10").fill("WELCOME10");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.getByText("Promo code applied!")).toBeVisible();
   await expect(page.getByText("Promo discount")).toBeVisible();
 
-  // 6. Place the order
-  await page.getByRole("button", { name: "Place order" }).click();
+  // 8. Place the batch order
+  await page.getByRole("button", { name: /Place.*2 orders/ }).click();
   await expect(page).toHaveURL(/\/tracking\/\d+/);
 
-  // 7. Live tracking page renders order info + AI ETA
+  // 9. Live tracking page renders order info + AI ETA
   await expect(page.getByRole("heading", { name: "Live tracking" })).toBeVisible();
   await expect(page.getByText("AI ETA")).toBeVisible();
   await expect(page.getByText(/~?(\d+)/).first()).toBeVisible();
@@ -49,4 +65,9 @@ test("customer places an order and sees live tracking", async ({ page }) => {
   const orderId = page.url().match(/\/tracking\/(\d+)/)?.[1];
   expect(orderId).toBeTruthy();
   test.info().annotations.push({ type: "orderId", description: orderId });
+
+  // 10. Both orders appear under "My orders"
+  await page.goto("/orders");
+  await expect(page.getByText("Spice Garden").first()).toBeVisible();
+  await expect(page.getByText("Dosa Plaza").first()).toBeVisible();
 });

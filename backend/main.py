@@ -9,18 +9,18 @@ Run:
     uvicorn backend.main:app --reload --port 8000
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend import config
+from backend import config, simulation
 from backend.db import Base, SessionLocal, engine
 from backend import models  # noqa: F401  (register tables on Base.metadata)
 from backend import seed
-from backend.simulation import simulation_loop
-from backend.routers import admin, auth, ml, orders, restaurants, tracking
+from backend.routers import admin, auth, ml, orders, restaurants, reviews, tracking
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("foodai")
@@ -35,9 +35,10 @@ async def lifespan(app: FastAPI):
         seed.seed_if_empty(db)
     finally:
         db.close()
+    simulation.MAIN_LOOP = asyncio.get_running_loop()
     task = None
     try:
-        task = __import__("asyncio").get_event_loop().create_task(simulation_loop())
+        task = asyncio.get_running_loop().create_task(simulation.simulation_loop())
     except Exception:
         logger.exception("simulation loop failed to start; continuing without it")
     yield
@@ -70,6 +71,7 @@ app.include_router(tracking.router)
 app.include_router(tracking.ws_router)
 app.include_router(ml.router)
 app.include_router(admin.router)
+app.include_router(reviews.router)
 
 
 @app.get("/api/health")

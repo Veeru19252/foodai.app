@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ordersApi } from "@/lib/api";
@@ -21,7 +21,7 @@ const DELIVERY_PRESETS = [
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const { items, restaurantId, subtotal, clear } = useCart();
+  const { items, groups, subtotal, clear } = useCart();
   const [promo, setPromo] = useState("");
   const [promoMessage, setPromoMessage] = useState("");
   const [promoDiscount, setPromoDiscount] = useState(0);
@@ -30,15 +30,13 @@ export default function CheckoutPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    if (restaurantId === null) return;
-  }, [restaurantId]);
-
   async function validatePromo() {
     if (!promo.trim()) return;
     setPromoMessage("");
+    // Promos apply to the first restaurant's order in a multi-restaurant cart.
+    const primarySubtotal = groups[0]?.subtotal ?? 0;
     try {
-      const res = await ordersApi.validatePromo(promo.trim(), subtotal);
+      const res = await ordersApi.validatePromo(promo.trim(), primarySubtotal);
       setPromoMessage(res.message);
       setPromoDiscount(res.ok ? res.discount : 0);
     } catch (err) {
@@ -49,23 +47,27 @@ export default function CheckoutPage() {
 
   async function placeOrder(e: FormEvent) {
     e.preventDefault();
-    if (!restaurantId || items.length === 0) return;
+    if (items.length === 0) return;
     setError("");
     setBusy(true);
     try {
-      const order = await ordersApi.create({
-        restaurant_id: restaurantId,
-        items: items.map((i) => ({
-          menu_item_id: i.menu_item_id,
-          quantity: i.quantity,
-        })),
-        coupon_code: promo.trim() || undefined,
-        delivery_lat: point.lat,
-        delivery_lng: point.lng,
-        delivery_address: address || point.address,
-      });
+      const res = await ordersApi.createBatch(
+        groups.map((g, idx) => ({
+          restaurant_id: g.restaurant_id,
+          items: g.items.map((i) => ({
+            menu_item_id: i.menu_item_id,
+            quantity: i.quantity,
+          })),
+          coupon_code: idx === 0 ? promo.trim() || undefined : undefined,
+          delivery_lat: point.lat,
+          delivery_lng: point.lng,
+          delivery_address: address || point.address,
+        }))
+      );
       clear();
-      router.push(`/tracking/${order.id}`);
+      // Land on the first order's live tracking page (others stay visible
+      // under "My orders").
+      router.push(`/tracking/${res.orders[0].id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to place order");
     } finally {
@@ -152,15 +154,33 @@ export default function CheckoutPage() {
 
           <aside className="h-fit rounded-2xl border border-gray-200 bg-white p-5 lg:col-span-2">
             <h2 className="mb-3 font-semibold">Order summary</h2>
-            <div className="divide-y divide-gray-100">
-              {items.map((i) => (
-                <div key={i.menu_item_id} className="flex justify-between py-2 text-sm">
-                  <span>
-                    {i.quantity} × {i.name}
-                  </span>
-                  <span className="font-medium">
-                    ₹{(i.price * i.quantity).toFixed(0)}
-                  </span>
+            <div className="space-y-3">
+              {groups.map((g) => (
+                <div
+                  key={g.restaurant_id}
+                  className="rounded-xl bg-gray-50 p-3"
+                >
+                  <p className="mb-1 text-sm font-semibold text-gray-700">
+                    {g.restaurant_name}
+                  </p>
+                  <div className="divide-y divide-gray-100">
+                    {g.items.map((i) => (
+                      <div
+                        key={i.menu_item_id}
+                        className="flex justify-between py-1.5 text-sm"
+                      >
+                        <span>
+                          {i.quantity} × {i.name}
+                        </span>
+                        <span className="font-medium">
+                          ₹{(i.price * i.quantity).toFixed(0)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-right text-xs text-gray-500">
+                    Group subtotal ₹{g.subtotal.toFixed(0)}
+                  </p>
                 </div>
               ))}
             </div>
@@ -175,6 +195,11 @@ export default function CheckoutPage() {
                   <span>−₹{promoDiscount.toFixed(0)}</span>
                 </div>
               )}
+              {groups.length > 1 && promo.trim() && (
+                <p className="text-xs text-gray-500">
+                  Promo applies to {groups[0].restaurant_name}
+                </p>
+              )}
               <div className="flex justify-between text-lg font-bold">
                 <span>Total</span>
                 <span>₹{total.toFixed(0)}</span>
@@ -186,10 +211,14 @@ export default function CheckoutPage() {
               disabled={busy || items.length === 0}
               className="mt-4 w-full rounded-lg bg-brand-600 py-3 font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
             >
-              {busy ? "Placing order…" : "Place order"}
+              {busy
+                ? "Placing orders…"
+                : `Place ${groups.length > 1 ? `${groups.length} orders` : "order"} · ₹${total.toFixed(0)}`}
             </button>
             <p className="mt-2 text-center text-xs text-gray-400">
-              AI ETA + live rider tracking after ordering
+              {groups.length > 1
+                ? "Each restaurant receives its own order and rider"
+                : "AI ETA + live rider tracking after ordering"}
             </p>
           </aside>
         </div>

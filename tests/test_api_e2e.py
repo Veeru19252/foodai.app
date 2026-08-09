@@ -241,3 +241,193 @@ def test_unauthenticated_requests_rejected(client):
     assert client.get("/orders").status_code == 401
     assert client.get("/tracking/1").status_code == 401
     assert client.get("/ml/eta?restaurant_id=1").status_code == 401
+
+
+def _customer_headers(client):
+    token = login(client, "customer@foodai.com")["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _line(menu_item_id, quantity):
+    return {"menu_item_id": menu_item_id, "quantity": quantity}
+
+
+# ---- Phase 3: batch orders ----
+
+def test_create_batch_order(client):
+    headers = _customer_headers(client)
+    resp = client.post(
+        "/orders/batch",
+        json={
+            "orders": [
+                {
+                    "restaurant_id": 1,
+                    "items": [_line(1, 2)],
+                    "coupon_code": "WELCOME10",
+                    "delivery_address": "5th Block, Koramangala",
+                    "delivery_lat": 12.9719,
+                    "delivery_lng": 77.6412,
+                },
+                {
+                    "restaurant_id": 2,
+                    "items": [_line(8, 1)],
+                    "delivery_address": "5th Block, Koramangala",
+                    "delivery_lat": 12.9719,
+                    "delivery_lng": 77.6412,
+                },
+            ]
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    orders = resp.json()["orders"]
+    assert len(orders) == 2
+    # Restaurant 1: 2 * 220 = 440; WELCOME10 = 10% (44, below cap 50) -> 396.
+    assert orders[0]["restaurant_id"] == 1
+    assert orders[0]["total"] == 396.0
+    assert orders[1]["restaurant_id"] == 2
+    return [o["id"] for o in orders], headers
+
+
+def test_batch_order_empty_rejected(client):
+    resp = client.post(
+        "/orders/batch", json={"orders": []}, headers=_customer_headers(client)
+    )
+    assert resp.status_code == 422
+
+
+# ---- Phase 3: cancel ----
+
+def test_customer_can_cancel_placed_order(client):
+    order_id, headers = test_create_batch_order(client)
+    resp = client.post(f"/orders/{order_id[0]}/cancel", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "CANCELLED"
+
+
+def test_cannot_cancel_after_dispatch(client):
+    order_id, driver, _cust, rest_token = test_restaurant_full_lifecycle(client)
+    resp = client.post(
+        f"/orders/{order_id}/cancel", headers=_customer_headers(client)
+    )
+    assert resp.status_code == 400
+
+
+def test_cannot_cancel_other_users_order(client):
+    order_id, headers = test_create_batch_order(client)
+    other = {"Authorization": "Bearer " + login(client, "test-user@example.com")["access_token"]}
+    resp = client.post(f"/orders/{order_id[0]}/cancel", headers=other)
+    assert resp.status_code == 403
+
+
+# ---- Phase 3: driver starts delivery ----
+
+def test_assigned_driver_can_dispatch(client):
+    order_id, driver, _cust, _rest = test_restaurant_full_lifecycle(client)
+    # Pick a fresh order and let the assigned driver dispatch it.
+    order_id, _h = test_create_batch_order(client)
+    order_id = order_id[0]
+    driver_token = login(client, driver["email"])["access_token"]
+    resp = client.patch(
+        f"/orders/{order_id}/status",
+        json={"status": "OUT_FOR_DELIVERY"},
+        headers={"Authorization": f"Bearer {driver_token}"},
+    )
+    # The driver isn't assigned to this new order yet.
+    assert resp.status_code == 403
+
+    rest_token = login(client, "spice@foodai.com")["access_token"]
+    client.post(
+        f"/orders/{order_id}/assign",
+        json={"driver_id": driver["id"]},
+        headers={"Authorization": f"Bearer {rest_token}"},
+    )
+    resp = client.patch(
+        f"/orders/{order_id}/status",
+        json={"status": "OUT_FOR_DELIVERY"},
+        headers={"Authorization": f"Bearer {driver_token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "OUT_FOR_DELIVERY"
+
+
+def test_unassigned_driver_cannot_dispatch(client):
+    order_id, headers = test_create_batch_order(client)
+    other_token = login(client, "rider@foodai.com")["access_token"]
+    resp = client.patch(
+        f"/orders/{order_id[0]}/status",
+        json={"status": "OUT_FOR_DELIVERY"},
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert resp.status_code == 403
+
+
+# ---- Phase 3: reviews ----
+
+def _delivered_order_id(client):
+    """Create, assign, and dispatch an order, then force delivery via DB."""
+    order_id, _headers = test_create_batch_order(client)
+    order_id = order_id[0]
+    rest_token = login(client, "spice@foodai.com")["access_token"]
+    driver = client.get("/orders/drivers", headers={"Authorization": f"Bearer {rest_token}"}).json()[0]
+    client.post(f"/orders/{order_id}/assign", json={"driver_id": driver["id"]}, headers={"Authorization": f"Bearer {rest_token}"})
+    client.patch(f"/orders/{order_id}/status", json={"status": "OUT_FOR_DELIVERY"}, headers={"Authorization": f"Bearer {rest_token}"})
+    # Mark delivered directly so the review gate is reachable without waiting.
+    from backend.models import Delivery, Order
+    from backend.db import SessionLocal
+    from datetime import datetime
+    db = SessionLocal()
+    try:
+        d = db.query(Delivery).filter(Delivery.order_id == order_id).first()
+        d.delivered_time = datetime.utcnow()
+        db.query(Order).filter(Order.id == order_id).update({"status": "DELIVERED"})
+        db.commit()
+    finally:
+        db.close()
+    return order_id
+
+
+def test_create_review_after_delivery(client):
+    order_id = _delivered_order_id(client)
+    resp = client.post(
+        "/reviews",
+        json={"order_id": order_id, "rating": 5, "comment": "Delicious!"},
+        headers=_customer_headers(client),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["rating"] == 5
+    assert resp.json()["restaurant_id"] == 1
+
+
+def test_duplicate_review_rejected(client):
+    order_id = _delivered_order_id(client)
+    headers = _customer_headers(client)
+    assert client.post("/reviews", json={"order_id": order_id, "rating": 4}, headers=headers).status_code == 201
+    assert client.post("/reviews", json={"order_id": order_id, "rating": 5}, headers=headers).status_code == 400
+
+
+def test_review_requires_delivered_order(client):
+    order_id, headers = test_create_batch_order(client)
+    resp = client.post("/reviews", json={"order_id": order_id[0], "rating": 3}, headers=headers)
+    assert resp.status_code == 400
+
+
+def test_restaurant_reviews_and_rating(client):
+    order_id = _delivered_order_id(client)
+    client.post("/reviews", json={"order_id": order_id, "rating": 5, "comment": "Great"}, headers=_customer_headers(client))
+
+    resp = client.get("/reviews/restaurant/1")
+    assert resp.status_code == 200
+    assert any(r["rating"] == 5 for r in resp.json())
+
+    resp = client.get("/reviews/restaurant/1/rating")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["review_count"] >= 1
+    assert body["rating"] is not None
+
+    # Restaurant list now carries review aggregates.
+    resp = client.get("/restaurants")
+    entry = next(r for r in resp.json() if r["id"] == 1)
+    assert entry["review_count"] >= 1
+    assert entry["reviews_rating"] >= 1.0

@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { catalogApi } from "@/lib/api";
+import { catalogApi, reviewsApi } from "@/lib/api";
 import { useCart } from "@/lib/cart";
-import type { MenuItem, Restaurant } from "@/lib/types";
+import type { MenuItem, Restaurant, Review } from "@/lib/types";
 
 export default function RestaurantMenuModal({
   restaurant,
@@ -13,8 +13,9 @@ export default function RestaurantMenuModal({
   onClose: () => void;
 }) {
   const [menu, setMenu] = useState<MenuItem[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
   const [error, setError] = useState("");
-  const { addItem, setQuantity, restaurantId, items } = useCart();
+  const { addItem, setQuantity, items } = useCart();
 
   useEffect(() => {
     catalogApi
@@ -23,6 +24,10 @@ export default function RestaurantMenuModal({
       .catch((err) =>
         setError(err instanceof Error ? err.message : "Failed to load menu")
       );
+    reviewsApi
+      .forRestaurant(restaurant.id)
+      .then(setReviews)
+      .catch(() => setReviews([]));
   }, [restaurant.id]);
 
   return (
@@ -56,9 +61,7 @@ export default function RestaurantMenuModal({
           )}
           {menu.map((item) => {
             const qty =
-              restaurantId === restaurant.id
-                ? items.find((i) => i.menu_item_id === item.id)?.quantity ?? 0
-                : 0;
+              items.find((i) => i.menu_item_id === item.id)?.quantity ?? 0;
             return (
               <div key={item.id} className="flex items-center justify-between px-5 py-4">
                 <div>
@@ -71,8 +74,10 @@ export default function RestaurantMenuModal({
                 {qty === 0 ? (
                   <button
                     onClick={() =>
-                      addItem(restaurant.id, {
+                      addItem(restaurant.id, restaurant.name, {
                         menu_item_id: item.id,
+                        restaurant_id: restaurant.id,
+                        restaurant_name: restaurant.name,
                         name: item.name,
                         price: item.price,
                         quantity: 1,
@@ -93,8 +98,10 @@ export default function RestaurantMenuModal({
                     <span className="w-4 text-center font-semibold">{qty}</span>
                     <button
                       onClick={() =>
-                        addItem(restaurant.id, {
+                        addItem(restaurant.id, restaurant.name, {
                           menu_item_id: item.id,
+                          restaurant_id: restaurant.id,
+                          restaurant_name: restaurant.name,
                           name: item.name,
                           price: item.price,
                           quantity: 1,
@@ -110,6 +117,31 @@ export default function RestaurantMenuModal({
             );
           })}
         </div>
+
+        {reviews.length > 0 && (
+          <div className="border-t border-gray-100 px-5 py-4">
+            <p className="mb-2 text-sm font-semibold">
+              ⭐ {restaurant.reviews_rating.toFixed(1)} · {reviews.length} review
+              {reviews.length === 1 ? "" : "s"}
+            </p>
+            <div className="max-h-40 space-y-2 overflow-y-auto">
+              {reviews.slice(0, 5).map((r) => (
+                <div key={r.id} className="text-sm">
+                  <p className="font-medium">
+                    {"★".repeat(r.rating)}
+                    <span className="text-gray-300">{"★".repeat(5 - r.rating)}</span>{" "}
+                    <span className="text-xs font-normal text-gray-500">
+                      {r.user_name}
+                    </span>
+                  </p>
+                  {r.comment && (
+                    <p className="text-gray-600">{r.comment}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
