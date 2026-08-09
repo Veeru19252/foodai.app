@@ -1,0 +1,1 @@
+"""FoodAI backend package (FastAPI)."""
