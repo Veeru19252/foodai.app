@@ -473,6 +473,115 @@ def test_driver_earnings(client):
     assert resp.status_code == 403
 
 
+def test_restaurant_menu_management(client):
+    owner_token = login(client, "spice@foodai.com")["access_token"]
+    owner_headers = {"Authorization": f"Bearer {owner_token}"}
+
+    resp = client.get("/restaurants/me", headers=owner_headers)
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "Spice Garden"
+
+    resp = client.post(
+        "/restaurants/me/menu",
+        json={"name": "Choco Lava Cake", "price": 120, "prep_time_min": 10},
+        headers=owner_headers,
+    )
+    assert resp.status_code == 201
+    item_id = resp.json()["id"]
+
+    resp = client.patch(
+        f"/restaurants/me/menu/{item_id}",
+        json={"price": 130},
+        headers=owner_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["price"] == 130.0
+
+    # Another restaurant owner cannot touch this item.
+    other_token = login(client, "dosa@foodai.com")["access_token"]
+    resp = client.patch(
+        f"/restaurants/me/menu/{item_id}",
+        json={"price": 1},
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert resp.status_code == 404
+
+    resp = client.delete(
+        f"/restaurants/me/menu/{item_id}",
+        headers=owner_headers,
+    )
+    assert resp.status_code == 200
+
+
+def test_restaurant_offers(client):
+    owner_token = login(client, "spice@foodai.com")["access_token"]
+    owner_headers = {"Authorization": f"Bearer {owner_token}"}
+
+    resp = client.post(
+        "/restaurants/me/offers",
+        json={
+            "code": "SPICE20",
+            "description": "20% off at Spice Garden",
+            "discount_type": "percent",
+            "discount_value": 20,
+            "min_order_value": 150,
+            "max_discount": 60,
+        },
+        headers=owner_headers,
+    )
+    assert resp.status_code == 201
+    offer = resp.json()
+    assert offer["code"] == "SPICE20"
+    assert offer["scope"] == "restaurant"
+    assert offer["active"] is True
+
+    resp = client.get("/restaurants/me/offers", headers=owner_headers)
+    codes = [o["code"] for o in resp.json()]
+    assert "SPICE20" in codes
+    assert "WELCOME10" in codes  # platform offers show too
+
+    resp = client.patch(
+        f"/restaurants/me/offers/{offer['id']}/toggle",
+        headers=owner_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["active"] is False
+
+    # Only the owning restaurant can toggle it.
+    other_token = login(client, "dosa@foodai.com")["access_token"]
+    resp = client.patch(
+        f"/restaurants/me/offers/{offer['id']}/toggle",
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert resp.status_code == 404
+
+
+def test_restaurant_analytics(client):
+    owner_token = login(client, "spice@foodai.com")["access_token"]
+    resp = client.get(
+        "/restaurants/me/analytics",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["restaurant_name"] == "Spice Garden"
+    assert body["total_orders"] >= 0
+    assert body["revenue"] >= 0
+    assert isinstance(body["orders_by_status"], dict)
+    assert isinstance(body["popular_items"], list)
+    assert body["orders_last_7_days"] >= 0
+    assert "avg_rating" in body
+    assert "review_count" in body
+
+    # A customer cannot access restaurant analytics.
+    customer_token = login(client, "customer@foodai.com")["access_token"]
+    resp = client.get(
+        "/restaurants/me/analytics",
+        headers={"Authorization": f"Bearer {customer_token}"},
+    )
+    assert resp.status_code == 403
+
+
 def test_tracking_includes_timeline(client):
     token = login(client, "customer@foodai.com")["access_token"]
     headers = {"Authorization": f"Bearer {token}"}

@@ -158,6 +158,82 @@ export const catalogApi = {
     api<MenuItem[]>(`/restaurants/${restaurantId}/menu`),
 };
 
+export interface RestaurantOffer {
+  id: number;
+  code: string;
+  description?: string | null;
+  discount_type: string;
+  discount_value: number;
+  min_order_value: number;
+  max_discount?: number | null;
+  valid_until?: string | null;
+  usage_limit?: number | null;
+  times_used: number;
+  active: boolean;
+  scope: "restaurant" | "platform";
+}
+
+export interface RestaurantAnalytics {
+  restaurant_id: number;
+  restaurant_name: string;
+  total_orders: number;
+  revenue: number;
+  orders_by_status: Record<string, number>;
+  avg_rating: number | null;
+  review_count: number;
+  popular_items: { name: string; quantity: number }[];
+  orders_last_7_days: number;
+}
+
+export const restaurantApi = {
+  me: () =>
+    api<
+      Restaurant & { reviews_rating: number; review_count: number }
+    >("/restaurants/me"),
+  myMenu: () => api<MenuItem[]>("/restaurants/me/menu"),
+  addMenuItem: (payload: {
+    name: string;
+    price: number;
+    prep_time_min: number;
+  }) =>
+    api<{ id: number; name: string; price: number }>("/restaurants/me/menu", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateMenuItem: (
+    itemId: number,
+    payload: { name?: string; price?: number; prep_time_min?: number }
+  ) =>
+    api<{ id: number; name: string; price: number }>(
+      `/restaurants/me/menu/${itemId}`,
+      { method: "PATCH", body: JSON.stringify(payload) }
+    ),
+  deleteMenuItem: (itemId: number) =>
+    api<{ ok: boolean }>(`/restaurants/me/menu/${itemId}`, {
+      method: "DELETE",
+    }),
+  offers: () => api<RestaurantOffer[]>("/restaurants/me/offers"),
+  createOffer: (payload: {
+    code: string;
+    description?: string;
+    discount_type: string;
+    discount_value: number;
+    min_order_value?: number;
+    max_discount?: number;
+    valid_until?: string;
+    usage_limit?: number;
+  }) =>
+    api<RestaurantOffer>("/restaurants/me/offers", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  toggleOffer: (offerId: number) =>
+    api<RestaurantOffer>(`/restaurants/me/offers/${offerId}/toggle`, {
+      method: "PATCH",
+    }),
+  analytics: () => api<RestaurantAnalytics>("/restaurants/me/analytics"),
+};
+
 export const ordersApi = {
   create: (payload: {
     restaurant_id: number;

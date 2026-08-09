@@ -58,9 +58,20 @@ export default function Navbar() {
             </>
           )}
           {user?.role === "restaurant" && (
-            <Link href="/restaurant/orders" className="font-medium hover:text-brand-600">
-              Orders
-            </Link>
+            <>
+              <Link href="/restaurant/orders" className="font-medium hover:text-brand-600">
+                Orders
+              </Link>
+              <Link href="/restaurant/menu" className="font-medium hover:text-brand-600">
+                Menu
+              </Link>
+              <Link href="/restaurant/offers" className="font-medium hover:text-brand-600">
+                Offers
+              </Link>
+              <Link href="/restaurant/analytics" className="font-medium hover:text-brand-600">
+                Analytics
+              </Link>
+            </>
           )}
           {user?.role === "delivery" && (
             <Link href="/driver" className="font-medium hover:text-brand-600">

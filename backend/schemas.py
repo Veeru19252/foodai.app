@@ -2,7 +2,7 @@
 FoodAI backend - Pydantic schemas (request/response contracts)
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -59,6 +59,23 @@ class MenuItemCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     price: float = Field(ge=0)
     prep_time_min: int = Field(ge=0, default=15)
+
+
+class MenuItemUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    price: Optional[float] = Field(default=None, ge=0)
+    prep_time_min: Optional[int] = Field(default=None, ge=0)
+
+
+class OfferCreate(BaseModel):
+    code: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = None
+    discount_type: str = Field(default="percent", pattern="^(percent|flat)$")
+    discount_value: float = Field(ge=0)
+    min_order_value: float = Field(ge=0, default=0.0)
+    max_discount: Optional[float] = Field(default=None, ge=0)
+    valid_until: Optional[date] = None
+    usage_limit: Optional[int] = Field(default=None, ge=1)
 
 
 # ---- orders ----

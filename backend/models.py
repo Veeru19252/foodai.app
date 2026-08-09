@@ -157,7 +157,10 @@ class PromoCode(Base):
     usage_limit = Column(Integer, nullable=True)
     times_used = Column(Integer, nullable=False, default=0)
     active = Column(Boolean, nullable=False, default=True)
+    restaurant_id = Column(Integer, ForeignKey("restaurants.id"), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    restaurant = relationship("Restaurant")
 
 
 class Review(Base):
