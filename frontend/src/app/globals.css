@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brand: #ea580c;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900 antialiased;
+}
+
+/* Leaflet is loaded on the tracking/checkout pages only. */
+.leaflet-container {
+  @apply rounded-xl;
+  font: inherit;
+}

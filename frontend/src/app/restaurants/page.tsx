@@ -1,0 +1,131 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { catalogApi } from "@/lib/api";
+import { useCart } from "@/lib/cart";
+import type { MenuItem, Restaurant } from "@/lib/types";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import RestaurantMenuModal from "@/components/RestaurantMenuModal";
+
+export default function RestaurantsPage() {
+  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
+  const [cuisines, setCuisines] = useState<string[]>([]);
+  const [cuisine, setCuisine] = useState("All");
+  const [error, setError] = useState("");
+  const [selected, setSelected] = useState<Restaurant | null>(null);
+  const { count, restaurantId, items } = useCart();
+
+  useEffect(() => {
+    catalogApi
+      .cuisines()
+      .then(setCuisines)
+      .catch(() => setCuisines([]));
+  }, []);
+
+  useEffect(() => {
+    setError("");
+    catalogApi
+      .restaurants(cuisine)
+      .then(setRestaurants)
+      .catch((err) =>
+        setError(err instanceof Error ? err.message : "Failed to load restaurants")
+      );
+  }, [cuisine]);
+
+  const cartSummary = useMemo(
+    () => (restaurantId ? items : []),
+    [items, restaurantId]
+  );
+
+  return (
+    <ProtectedRoute role="customer">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Restaurants near you</h1>
+          <p className="text-sm text-gray-500">
+            Track every order live with AI-predicted ETAs
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setCuisine("All")}
+            className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+              cuisine === "All"
+                ? "bg-brand-600 text-white"
+                : "bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+            }`}
+          >
+            All
+          </button>
+          {cuisines.map((c) => (
+            <button
+              key={c}
+              onClick={() => setCuisine(c)}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+                cuisine === c
+                  ? "bg-brand-600 text-white"
+                  : "bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+              }`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {error && (
+        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {restaurants.map((r) => (
+          <button
+            key={r.id}
+            onClick={() => setSelected(r)}
+            className="group rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-sm transition hover:shadow-md"
+          >
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-lg font-semibold group-hover:text-brand-600">
+                {r.name}
+              </h3>
+              <span className="rounded-lg bg-green-50 px-2 py-0.5 text-sm font-semibold text-green-700">
+                ★ {r.rating.toFixed(1)}
+              </span>
+            </div>
+            <p className="text-sm text-gray-500">{r.cuisine}</p>
+            <p className="mt-1 text-xs text-gray-400">{r.address}</p>
+          </button>
+        ))}
+      </div>
+
+      {restaurants.length === 0 && !error && (
+        <p className="py-16 text-center text-gray-400">
+          No restaurants in this category yet.
+        </p>
+      )}
+
+      {selected && (
+        <RestaurantMenuModal
+          restaurant={selected}
+          onClose={() => setSelected(null)}
+        />
+      )}
+
+      {cartSummary.length > 0 && (
+        <div className="fixed bottom-4 left-1/2 z-[70] w-[min(92vw,480px)] -translate-x-1/2 rounded-2xl bg-gray-900 px-5 py-3 text-white shadow-xl">
+          <div className="flex items-center justify-between text-sm">
+            <span>
+              {count} item{count === 1 ? "" : "s"} in cart
+            </span>
+            <Link href="/checkout" className="font-semibold text-brand-500">
+              View cart →
+            </Link>
+          </div>
+        </div>
+      )}
+    </ProtectedRoute>
+  );
+}
