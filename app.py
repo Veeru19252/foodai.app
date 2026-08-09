@@ -122,6 +122,19 @@ def add_to_cart(menu_item_id: int, name: str, price: float) -> None:
         cart[menu_item_id] = {"name": name, "price": price, "quantity": 1}
 
 
+def add_to_cart_and_track(
+    menu_item_id: int, name: str, price: float, nav_key: str
+) -> None:
+    """Add an item to the cart and jump the customer to the tracking tab.
+
+    Runs as the Add-to-cart button's ``on_click`` callback: a callback is the
+    one place Streamlit allows writing the nav radio's session value after the
+    widget has already been rendered in this run.
+    """
+    add_to_cart(menu_item_id, name, price)
+    st.session_state[nav_key] = "Track Delivery"
+
+
 def cart_total(cart: dict) -> float:
     """Return the total price of all cart items."""
     return sum(item["price"] * item["quantity"] for item in cart.values())
@@ -208,6 +221,7 @@ def show_login_page() -> None:
                     user = login(email, "password123")
                     if user:
                         st.session_state["user"] = user
+                        _reset_nav_for_role(user[4])
                         st.rerun()
                     else:
                         st.error(f"Could not sign in as {label}. Please try again.")
@@ -230,6 +244,7 @@ def show_login_page() -> None:
                 user = login(email, password)
                 if user:
                     st.session_state["user"] = user
+                    _reset_nav_for_role(user[4])
                     st.rerun()
                 else:
                     st.error(
@@ -253,8 +268,13 @@ def show_login_page() -> None:
                     st.error(message)
 
 
-def show_restaurant_listing() -> None:
-    """Customer page: browse restaurants by cuisine and add meals to the cart."""
+def show_restaurant_listing(nav_key: str) -> None:
+    """Customer page: browse restaurants by cuisine and add meals to the cart.
+
+    ``nav_key`` is the session-state key of the customer navigation radio; after
+    an add-to-cart click we set it to "Track Delivery" so the customer jumps
+    straight to the live map.
+    """
     st.markdown(
         page_header(
             "Restaurants",
@@ -291,9 +311,12 @@ def show_restaurant_listing() -> None:
                     menu_row(item_name, price, prep),
                     unsafe_allow_html=True,
                 )
-                if st.button("Add to cart", key=f"add_{item_id}"):
-                    add_to_cart(item_id, item_name, price)
-                    st.rerun()
+                st.button(
+                    "Add to cart",
+                    key=f"add_{item_id}",
+                    on_click=add_to_cart_and_track,
+                    args=(item_id, item_name, price, nav_key),
+                )
     st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -1082,6 +1105,17 @@ def _nav_options_for_role(role: str) -> list:
     return _NAV_OPTIONS.get(role, _NAV_OPTIONS["customer"])
 
 
+def _reset_nav_for_role(role: str) -> None:
+    """Point the role's nav radio at its home tab after login.
+
+    Called from the login handlers while the radio has not yet been rendered
+    this run, so writing its session key is allowed. This stops a customer who
+    was redirected to Track Delivery from landing back there on their next
+    login instead of the restaurant list.
+    """
+    st.session_state["main_nav_" + role] = _nav_options_for_role(role)[0]
+
+
 def _render_header_bar(user: tuple) -> None:
     """Render the branded top bar with the user chip and cart count."""
     st.markdown(
@@ -1149,7 +1183,7 @@ def main() -> None:
             st.rerun()
     else:
         if page == "Restaurants":
-            show_restaurant_listing()
+            show_restaurant_listing("main_nav_" + user[4])
         elif page == "Cart":
             show_cart_page(user)
         elif page == "Track Delivery":
