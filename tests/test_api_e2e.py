@@ -268,6 +268,138 @@ def test_ml_recommendations(client):
     assert resp.status_code == 403
 
 
+def test_item_recommendations(client):
+    token = login(client, "customer@foodai.com")["access_token"]
+    resp = client.get(
+        "/ml/recommendations/items?restaurant_id=1",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["items"]) <= 5
+    assert "fallback" in body
+    for item in body["items"]:
+        assert item["name"]
+        assert "score" in item
+
+
+def test_reorder_order(client):
+    token = login(client, "customer@foodai.com")["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = client.post(
+        "/orders",
+        json={"restaurant_id": 1, "items": [{"menu_item_id": 1, "quantity": 2}]},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    source_id = resp.json()["id"]
+
+    resp = client.post(f"/orders/{source_id}/reorder", headers=headers)
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["restaurant_id"] == 1
+    assert body["status"] == "PLACED"
+    assert body["items"][0]["quantity"] == 2
+    assert body["total"] > 0
+
+    # Reordering someone else's order is forbidden.
+    other = login(client, "test-user@example.com")["access_token"]
+    resp = client.post(
+        f"/orders/{source_id}/reorder",
+        headers={"Authorization": f"Bearer {other}"},
+    )
+    assert resp.status_code == 403
+
+
+def test_addresses_crud(client):
+    token = login(client, "customer@foodai.com")["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    resp = client.get("/addresses", headers=headers)
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/addresses",
+        json={"label": "Home", "address": "12 MG Road", "lat": 12.97, "lng": 77.59},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    addr = resp.json()
+    assert addr["label"] == "Home"
+
+    resp = client.get("/addresses", headers=headers)
+    assert any(a["id"] == addr["id"] for a in resp.json())
+
+    # Deleting someone else's address is forbidden.
+    other = login(client, "test-user@example.com")["access_token"]
+    resp = client.delete(
+        f"/addresses/{addr['id']}",
+        headers={"Authorization": f"Bearer {other}"},
+    )
+    assert resp.status_code == 403
+
+    resp = client.delete(f"/addresses/{addr['id']}", headers=headers)
+    assert resp.status_code == 200
+
+
+def test_admin_role_update(client):
+    admin_token = login(client, "admin@foodai.com")["access_token"]
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # test-user@example.com is a customer by default.
+    resp = client.get("/admin/users", headers=headers)
+    users = {u["email"]: u for u in resp.json()}
+    target_id = users["test-user@example.com"]["id"]
+
+    resp = client.patch(
+        f"/admin/users/{target_id}/role",
+        json={"role": "delivery"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["role"] == "delivery"
+
+    resp = client.patch(
+        f"/admin/users/{target_id}/role",
+        json={"role": "customer"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+
+    # Invalid roles and non-admins are rejected.
+    resp = client.patch(
+        f"/admin/users/{target_id}/role",
+        json={"role": "superuser"},
+        headers=headers,
+    )
+    assert resp.status_code == 400
+
+    customer_token = login(client, "customer@foodai.com")["access_token"]
+    resp = client.patch(
+        f"/admin/users/{target_id}/role",
+        json={"role": "delivery"},
+        headers={"Authorization": f"Bearer {customer_token}"},
+    )
+    assert resp.status_code == 403
+
+
+def test_tracking_includes_timeline(client):
+    token = login(client, "customer@foodai.com")["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = client.post(
+        "/orders",
+        json={"restaurant_id": 2, "items": [{"menu_item_id": 6, "quantity": 1}]},
+        headers=headers,
+    )
+    order_id = resp.json()["id"]
+    resp = client.get(f"/tracking/{order_id}", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "created_at" in body
+    assert "pickup_time" in body
+    assert "delivered_time" in body
+
+
 
 def test_admin_overview_guarded(client):
     token = login(client, "customer@foodai.com")["access_token"]

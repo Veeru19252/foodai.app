@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from backend import security
 from backend.db import get_db
 from backend.models import Delivery, MenuItem, Order, Restaurant, User, VALID_ORDER_STATUSES
-from backend.schemas import MenuItemCreate, RestaurantCreate
+from backend.schemas import MenuItemCreate, RestaurantCreate, UserRoleUpdate
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -48,6 +48,26 @@ def overview(user: User = Depends(admin_only), db: Session = Depends(get_db)):
 def list_users(user: User = Depends(admin_only), db: Session = Depends(get_db)):
     users = db.query(User).order_by(User.id).all()
     return [{"id": u.id, "name": u.name, "email": u.email, "role": u.role} for u in users]
+
+
+VALID_ROLES = ("customer", "restaurant", "delivery", "admin")
+
+
+@router.patch("/users/{user_id}/role")
+def update_user_role(
+    user_id: int,
+    payload: UserRoleUpdate,
+    user: User = Depends(admin_only),
+    db: Session = Depends(get_db),
+):
+    if payload.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail="Invalid role.")
+    target = db.query(User).filter(User.id == user_id).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    target.role = payload.role
+    db.commit()
+    return {"id": target.id, "role": target.role}
 
 
 @router.get("/orders")

@@ -1,10 +1,11 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ordersApi } from "@/lib/api";
+import { addressesApi, ordersApi } from "@/lib/api";
 import { useCart } from "@/lib/cart";
+import type { SavedAddress } from "@/lib/types";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import LocationPicker, {
   DEFAULT_POINT,
@@ -27,8 +28,42 @@ export default function CheckoutPage() {
   const [promoDiscount, setPromoDiscount] = useState(0);
   const [address, setAddress] = useState(DEFAULT_POINT.address);
   const [point, setPoint] = useState<DeliveryPoint>(DEFAULT_POINT);
+  const [saved, setSaved] = useState<SavedAddress[]>([]);
+  const [saveLabel, setSaveLabel] = useState("Home");
+  const [saveNote, setSaveNote] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    addressesApi
+      .list()
+      .then(setSaved)
+      .catch(() => setSaved([]));
+  }, []);
+
+  function applyAddress(s: SavedAddress) {
+    setAddress(s.address);
+    if (s.lat != null && s.lng != null) {
+      setPoint({ address: s.address, lat: s.lat, lng: s.lng });
+    }
+  }
+
+  async function saveCurrentAddress() {
+    if (!address.trim()) return;
+    setSaveNote("");
+    try {
+      await addressesApi.create({
+        label: saveLabel.trim() || "Home",
+        address: address.trim(),
+        lat: point.lat,
+        lng: point.lng,
+      });
+      setSaved(await addressesApi.list());
+      setSaveNote("Address saved");
+    } catch (err) {
+      setSaveNote(err instanceof Error ? err.message : "Could not save address");
+    }
+  }
 
   async function validatePromo() {
     if (!promo.trim()) return;
@@ -114,6 +149,42 @@ export default function CheckoutPage() {
                 }}
                 presets={DELIVERY_PRESETS}
               />
+              <div className="mt-3 border-t border-gray-100 pt-3">
+                <p className="mb-2 text-sm font-medium">Saved addresses</p>
+                {saved.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {saved.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => applyAddress(s)}
+                        className="rounded-full border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 hover:border-brand-500 hover:text-brand-700"
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    value={saveLabel}
+                    onChange={(e) => setSaveLabel(e.target.value)}
+                    className="w-28 rounded-lg border border-gray-300 px-2 py-1.5 text-xs focus:border-brand-500 focus:outline-none"
+                    placeholder="Label"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveCurrentAddress}
+                    className="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-200"
+                  >
+                    Save current address
+                  </button>
+                  {saveNote && (
+                    <span className="text-xs text-green-600">{saveNote}</span>
+                  )}
+                </div>
+              </div>
             </section>
 
             <section className="rounded-2xl border border-gray-200 bg-white p-5">

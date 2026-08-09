@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { adminApi, mlApi } from "@/lib/api";
-import type { AdminOverview, ForecastSeries } from "@/lib/types";
+import type { AdminOverview, AdminUser, ForecastSeries, Role } from "@/lib/types";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import StatusBadge from "@/components/StatusBadge";
 
@@ -14,9 +14,18 @@ const ZONE_COLORS: Record<string, string> = {
   E: "bg-sky-500",
 };
 
+const ROLE_COLORS: Record<string, string> = {
+  customer: "bg-blue-100 text-blue-700",
+  restaurant: "bg-amber-100 text-amber-700",
+  delivery: "bg-violet-100 text-violet-700",
+  admin: "bg-red-100 text-red-700",
+};
+
 export default function AdminPage() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [forecast, setForecast] = useState<ForecastSeries | null>(null);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [userFilter, setUserFilter] = useState("");
   const [orders, setOrders] = useState<
     {
       id: number;
@@ -37,11 +46,30 @@ export default function AdminPage() {
         setError(err instanceof Error ? err.message : "Failed to load dashboard")
       );
     adminApi.orders().then(setOrders).catch(() => setOrders([]));
+    adminApi.users().then(setUsers).catch(() => setUsers([]));
     mlApi
       .forecastSeries(6)
       .then(setForecast)
       .catch(() => setForecast(null));
   }, []);
+
+  async function changeRole(userId: number, role: Role) {
+    setError("");
+    try {
+      await adminApi.updateUserRole(userId, role);
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, role } : u))
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update role");
+    }
+  }
+
+  const filteredUsers = users.filter((u) =>
+    `${u.name} ${u.email} ${u.role}`
+      .toLowerCase()
+      .includes(userFilter.trim().toLowerCase())
+  );
 
   const statCards = overview
     ? [
@@ -154,6 +182,56 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-semibold">Users</h2>
+          <input
+            type="text"
+            value={userFilter}
+            onChange={(e) => setUserFilter(e.target.value)}
+            placeholder="Filter by name, email or role"
+            className="w-56 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none"
+          />
+        </div>
+        <div className="max-h-80 divide-y divide-gray-100 overflow-y-auto">
+          {filteredUsers.length === 0 ? (
+            <p className="py-4 text-sm text-gray-400">No users match.</p>
+          ) : (
+            filteredUsers.map((u) => (
+              <div
+                key={u.id}
+                className="flex items-center justify-between gap-3 py-2 text-sm"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{u.name}</p>
+                  <p className="truncate text-xs text-gray-500">{u.email}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      ROLE_COLORS[u.role] ?? "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    {u.role}
+                  </span>
+                  <select
+                    value={u.role}
+                    onChange={(e) => changeRole(u.id, e.target.value as Role)}
+                    className="rounded-lg border border-gray-300 px-2 py-1 text-xs focus:border-brand-500 focus:outline-none"
+                    aria-label={`Change role for ${u.name}`}
+                  >
+                    <option value="customer">customer</option>
+                    <option value="restaurant">restaurant</option>
+                    <option value="delivery">delivery</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
 
       <div className="rounded-2xl border border-gray-200 bg-white p-5">
         <h2 className="mb-3 font-semibold">Recent orders</h2>

@@ -104,6 +104,9 @@ export interface TrackingState {
   progress: number;
   eta_min?: number | null;
   eta_source: string;
+  created_at?: string | null;
+  pickup_time?: string | null;
+  delivered_time?: string | null;
 }
 
 export interface DriverBrief {
@@ -161,4 +164,34 @@ export interface Recommendation {
   review_count: number;
   score: number;
   reason: string;
+}
+
+export interface ItemRecommendation {
+  menu_item_id: number;
+  name: string;
+  price: number;
+  prep_time_min: number;
+  score: number;
+  reason: string;
+}
+
+export interface ItemRecommendationResponse {
+  items: ItemRecommendation[];
+  fallback: boolean;
+}
+
+export interface SavedAddress {
+  id: number;
+  label: string;
+  address: string;
+  lat?: number | null;
+  lng?: number | null;
+  created_at: string;
+}
+
+export interface AdminUser {
+  id: number;
+  name: string;
+  email: string;
+  role: Role;
 }

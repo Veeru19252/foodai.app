@@ -274,6 +274,57 @@ def create_orders_batch(
     return BatchOrderResponse(orders=[_order_detail(o) for o in orders])
 
 
+@router.post("/{order_id}/reorder", response_model=OrderOut, status_code=201)
+def reorder_order(
+    order_id: int,
+    user: User = Depends(customer_only),
+    db: Session = Depends(get_db),
+):
+    """One-tap "Order again": clone a past order's items into a fresh PLACED
+    order at the same restaurant (prices re-resolved server-side)."""
+    source = db.query(Order).filter(Order.id == order_id).first()
+    if source is None:
+        raise HTTPException(status_code=404, detail="Order not found.")
+    if source.customer_id != user.id:
+        raise HTTPException(status_code=403, detail="You cannot reorder this order.")
+
+    menu = {
+        mi.id: mi
+        for mi in db.query(MenuItem)
+        .filter(MenuItem.restaurant_id == source.restaurant_id)
+        .all()
+    }
+    for oi in source.items:
+        if oi.menu_item_id not in menu:
+            raise HTTPException(
+                status_code=400,
+                detail="One or more items are no longer on this restaurant's menu.",
+            )
+
+    subtotal = sum(menu[oi.menu_item_id].price * oi.quantity for oi in source.items)
+    order = Order(
+        customer_id=user.id,
+        restaurant_id=source.restaurant_id,
+        total=round(subtotal, 2),
+        delivery_lat=source.delivery_lat,
+        delivery_lng=source.delivery_lng,
+        delivery_address=source.delivery_address,
+        status="PLACED",
+    )
+    db.add(order)
+    db.flush()
+    for oi in source.items:
+        db.add(OrderItem(
+            order_id=order.id,
+            menu_item_id=oi.menu_item_id,
+            quantity=oi.quantity,
+            price=menu[oi.menu_item_id].price,
+        ))
+    db.commit()
+    db.refresh(order)
+    return _order_detail(order)
+
+
 @router.get("/{order_id}")
 def get_order(
     order_id: int,

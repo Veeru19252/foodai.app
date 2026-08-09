@@ -2,14 +2,23 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ordersApi } from "@/lib/api";
-import type { OrderBrief } from "@/lib/types";
+import { useRouter } from "next/navigation";
+import { ordersApi, trackingApi } from "@/lib/api";
+import type { OrderBrief, TrackingState } from "@/lib/types";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import StatusBadge from "@/components/StatusBadge";
 import ReviewModal from "@/components/ReviewModal";
 
+function fmtTime(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 export default function OrdersPage() {
+  const router = useRouter();
   const [orders, setOrders] = useState<OrderBrief[]>([]);
+  const [timelines, setTimelines] = useState<Record<number, TrackingState>>({});
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -19,7 +28,20 @@ export default function OrdersPage() {
   const load = useCallback(() => {
     ordersApi
       .mine()
-      .then(setOrders)
+      .then((rows) => {
+        setOrders(rows);
+        // Pull live tracking for a compact timeline preview (created → pickup → delivered).
+        rows
+          .filter((o) => o.status !== "CANCELLED")
+          .forEach((o) => {
+            trackingApi
+              .state(o.id)
+              .then((state) =>
+                setTimelines((prev) => ({ ...prev, [o.id]: state }))
+              )
+              .catch(() => undefined);
+          });
+      })
       .catch((err) =>
         setError(err instanceof Error ? err.message : "Failed to load orders")
       )
@@ -38,6 +60,20 @@ export default function OrdersPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not cancel order");
     } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function reorder(orderId: number) {
+    setBusyId(orderId);
+    try {
+      const order = await ordersApi.reorder(orderId);
+      setError("");
+      load();
+      // Land on the fresh order's live tracking page.
+      router.push(`/tracking/${order.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reorder");
       setBusyId(null);
     }
   }
@@ -71,6 +107,14 @@ export default function OrdersPage() {
         <div className="space-y-3">
           {orders.map((o) => {
             const reviewed = reviewedIds.has(o.id);
+            const timeline = timelines[o.id];
+            const steps = timeline
+              ? [
+                  { label: "Ordered", time: fmtTime(timeline.created_at) },
+                  { label: "Picked up", time: fmtTime(timeline.pickup_time) },
+                  { label: "Delivered", time: fmtTime(timeline.delivered_time) },
+                ].filter((s) => s.time)
+              : [];
             return (
               <div
                 key={o.id}
@@ -91,6 +135,21 @@ export default function OrdersPage() {
                     <StatusBadge status={o.status} />
                   </div>
                 </Link>
+                {steps.length > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                    {steps.map((s, i) => (
+                      <span key={s.label} className="flex items-center gap-2">
+                        {i > 0 && <span className="text-gray-300">→</span>}
+                        <span>
+                          {s.label}{" "}
+                          <span className="font-medium text-gray-700">
+                            {s.time}
+                          </span>
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-3 flex gap-2 border-t border-gray-100 pt-3">
                   {o.status !== "CANCELLED" && (
                     <Link
@@ -99,6 +158,15 @@ export default function OrdersPage() {
                     >
                       Track →
                     </Link>
+                  )}
+                  {o.status !== "CANCELLED" && (
+                    <button
+                      onClick={() => reorder(o.id)}
+                      disabled={busyId === o.id}
+                      className="text-sm font-semibold text-brand-600 hover:underline disabled:opacity-60"
+                    >
+                      {busyId === o.id ? "Reordering…" : "Order again"}
+                    </button>
                   )}
                   {cancellable(o) && (
                     <button

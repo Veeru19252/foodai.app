@@ -8,9 +8,11 @@
 
 import type {
   AdminOverview,
+  AdminUser,
   AuthResponse,
   DriverBrief,
   ForecastSeries,
+  ItemRecommendationResponse,
   MenuItem,
   OrderBrief,
   OrderDetail,
@@ -19,6 +21,7 @@ import type {
   Restaurant,
   RestaurantOrder,
   Review,
+  SavedAddress,
   TrackingState,
 } from "@/lib/types";
 
@@ -185,6 +188,8 @@ export const ordersApi = {
   cancel: (orderId: number) =>
     api<OrderDetail>(`/orders/${orderId}/cancel`, { method: "POST" }),
   mine: () => api<OrderBrief[]>("/orders"),
+  reorder: (orderId: number) =>
+    api<OrderDetail>(`/orders/${orderId}/reorder`, { method: "POST" }),
   restaurantOrders: () => api<RestaurantOrder[]>("/orders/restaurant"),
   driverOrders: () =>
     api<
@@ -226,6 +231,22 @@ export const reviewsApi = {
     api<Review[]>(`/reviews/restaurant/${restaurantId}`),
 };
 
+export const addressesApi = {
+  list: () => api<SavedAddress[]>("/addresses"),
+  create: (payload: {
+    label: string;
+    address: string;
+    lat?: number;
+    lng?: number;
+  }) =>
+    api<SavedAddress>("/addresses", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  remove: (addressId: number) =>
+    api<{ ok: boolean }>(`/addresses/${addressId}`, { method: "DELETE" }),
+};
+
 export const trackingApi = {
   state: (orderId: number) => api<TrackingState>(`/tracking/${orderId}`),
 };
@@ -234,16 +255,22 @@ export const mlApi = {
   forecastSeries: (hours = 6) =>
     api<ForecastSeries>(`/ml/forecast/series?hours=${hours}`),
   recommendations: () => api<{ recommendations: Recommendation[]; fallback: boolean }>("/ml/recommendations"),
+  itemRecommendations: (restaurantId: number) =>
+    api<ItemRecommendationResponse>(
+      `/ml/recommendations/items?restaurant_id=${restaurantId}`
+    ),
   orderPrediction: (orderId: number) =>
     api<OrderPrediction>(`/ml/order/${orderId}`),
 };
 
 export const adminApi = {
   overview: () => api<AdminOverview>("/admin/overview"),
-  users: () =>
-    api<{ id: number; name: string; email: string; role: string }[]>(
-      "/admin/users"
-    ),
+  users: () => api<AdminUser[]>("/admin/users"),
+  updateUserRole: (userId: number, role: string) =>
+    api<{ id: number; role: string }>(`/admin/users/${userId}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
   orders: () =>
     api<
       {

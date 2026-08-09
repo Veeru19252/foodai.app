@@ -183,3 +183,16 @@ class ReviewOut(BaseModel):
     rating: int
     comment: Optional[str]
     created_at: datetime
+
+
+# ---- addresses ----
+
+class SavedAddressIn(BaseModel):
+    label: str = Field(min_length=1, max_length=64)
+    address: str = Field(min_length=1, max_length=255)
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
+
+class UserRoleUpdate(BaseModel):
+    role: str = Field(min_length=1, max_length=32)

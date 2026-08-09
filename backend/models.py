@@ -165,3 +165,17 @@ class Review(Base):
     order = relationship("Order")
     user = relationship("User")
     restaurant = relationship("Restaurant")
+
+
+class SavedAddress(Base):
+    __tablename__ = "saved_addresses"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    label = Column(String(64), nullable=False)
+    address = Column(String(255), nullable=False)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    user = relationship("User")
