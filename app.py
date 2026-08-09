@@ -28,6 +28,7 @@ import forecast_service
 import maps
 import plotly.express as px
 import pymysql
+import routing
 import streamlit as st
 import tracking
 from pymysql.err import IntegrityError
@@ -407,12 +408,12 @@ def show_cart_page(user) -> None:
             else preset_coords
         )
 
-        # Google-Maps-style route preview from this cart's restaurant to the
+        # Road-following route preview from this cart's restaurant to the
         # delivery point, when the restaurant can be resolved.
         preview_route = None
         cart_restaurant_id = _find_cart_restaurant(cart)
         if cart_restaurant_id is not None:
-            preview_route = tracking.build_route(
+            preview_route, _preview_km = routing.get_route(
                 tracking.restaurant_coordinates(cart_restaurant_id),
                 current_coords,
             )
@@ -650,13 +651,12 @@ def show_delivery_panel(user) -> None:
     restaurant_id, delivery_lat, delivery_lng, delivery_address = row
     start = tracking.restaurant_coordinates(restaurant_id)
     end = _delivery_end_coordinates((delivery_lat, delivery_lng, delivery_address))
-    route = tracking.build_route(start, end)
+    route, route_distance_km = routing.get_route(start, end)
 
     # Route card: restaurant -> customer, wrapping the live delivery flow.
     st.markdown('<div class="order-card">', unsafe_allow_html=True)
     st.write(f"**{restaurant_name}** → **{customer_name}**")
-    distance = tracking.format_distance(tracking.route_length_km(route))
-    st.caption(f"📍 {distance} to drop-off")
+    st.caption(f"📍 {tracking.format_distance(route_distance_km)} to drop-off")
 
     # Not picked up yet: show the start button and stop.
     if pickup_time is None:
@@ -714,6 +714,7 @@ def show_delivery_panel(user) -> None:
         restaurant_name,
         receiver_name=customer_name,
         rider_pos=rider_position,
+        route=route,
     )
     # returned_objects=[] keeps the map read-only (no click-driven reruns).
     st_folium(
@@ -780,7 +781,7 @@ def show_customer_tracking(user) -> None:
     restaurant_id, delivery_lat, delivery_lng, delivery_address = row
     start = tracking.restaurant_coordinates(restaurant_id)
     end = _delivery_end_coordinates((delivery_lat, delivery_lng, delivery_address))
-    route = tracking.build_route(start, end)
+    route, route_distance_km = routing.get_route(start, end)
 
     # Rider position: use the latest logged GPS point, else the restaurant.
     conn = get_connection()
@@ -793,11 +794,15 @@ def show_customer_tracking(user) -> None:
     rider_pos = (latest[0], latest[1]) if latest is not None else start
 
     st.write(f"**{restaurant_name}** — Status: **{status}**")
-    distance = tracking.format_distance(tracking.route_length_km(route))
     if delivery_address:
-        st.caption(f"📍 Delivering to {delivery_address} · {distance} away")
+        st.caption(
+            f"📍 Delivering to {delivery_address} "
+            f"· {tracking.format_distance(route_distance_km)} away"
+        )
     else:
-        st.caption(f"📍 Delivering to you · {distance} away")
+        st.caption(
+            f"📍 Delivering to you · {tracking.format_distance(route_distance_km)} away"
+        )
 
     # Order progress timeline: PLACED -> CONFIRMED -> PREPARING -> OUT_FOR_DELIVERY -> DELIVERED.
     status_flow = ["PLACED", "CONFIRMED", "PREPARING", "OUT_FOR_DELIVERY", "DELIVERED"]
@@ -809,6 +814,7 @@ def show_customer_tracking(user) -> None:
         restaurant_name,
         receiver_name=delivery_address or "You",
         rider_pos=rider_pos,
+        route=route,
     )
     # returned_objects=[] keeps the map read-only (no click-driven reruns).
     st.markdown('<div class="menu-card">', unsafe_allow_html=True)

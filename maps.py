@@ -15,7 +15,7 @@ needs. It imports folium + tracking, but NOT streamlit / streamlit_folium.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Sequence
 
 import folium
 
@@ -89,14 +89,17 @@ def build_delivery_map(
     restaurant_name: str,
     receiver_name: str,
     rider_pos: Optional[tuple[float, float]] = None,
+    route: Optional[Sequence] = None,
 ) -> folium.Map:
     """Return the shared restaurant -> customer tracking map with icon markers.
 
-    The route always runs start (restaurant) to end (receiver/customer).
-    ``rider_pos`` is the delivery bot's current position (defaults to the
-    restaurant until pickup is logged).
+    The route always runs start (restaurant) to end (receiver/customer). Pass
+    ``route`` to draw a road-following route (e.g. from routing.get_route);
+    otherwise a straight line is drawn as a fallback. ``rider_pos`` is the
+    delivery bot's current position (defaults to the restaurant until pickup
+    is logged).
     """
-    route = tracking.build_route(start, end)
+    route = route if route is not None else tracking.build_route(start, end)
     rider_pos = rider_pos if rider_pos is not None else start
     m = styled_map(location=start)
     route_layer(m, route)
