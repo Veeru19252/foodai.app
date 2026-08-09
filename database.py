@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS orders (
     total DOUBLE NOT NULL DEFAULT 0.0,
     coupon_code VARCHAR(255),
     discount_amount DOUBLE NOT NULL DEFAULT 0,
+    delivery_lat DOUBLE,
+    delivery_lng DOUBLE,
+    delivery_address VARCHAR(255),
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (customer_id) REFERENCES users (id),
     FOREIGN KEY (restaurant_id) REFERENCES restaurants (id),
@@ -231,6 +234,11 @@ def init_db() -> None:
         "discount_amount",
         "discount_amount DOUBLE NOT NULL DEFAULT 0",
     )
+    _ensure_column(conn, "orders", "delivery_lat", "delivery_lat DOUBLE NULL")
+    _ensure_column(conn, "orders", "delivery_lng", "delivery_lng DOUBLE NULL")
+    _ensure_column(
+        conn, "orders", "delivery_address", "delivery_address VARCHAR(255) NULL"
+    )
     conn.commit()
     conn.close()
 
@@ -296,6 +304,9 @@ def create_order(
     items: list[tuple[int, int, float]],  # [(menu_item_id, quantity, price)]
     coupon_code: Optional[str] = None,
     discount_amount: float = 0.0,
+    delivery_lat: Optional[float] = None,
+    delivery_lng: Optional[float] = None,
+    delivery_address: Optional[str] = None,
 ) -> int:
     """Create an order with its items. Returns the new order id.
 
@@ -303,13 +314,19 @@ def create_order(
     promo discount (discount_amount), floored at 0. Backward-compatible —
     with no coupon, total is exactly the item subtotal and the new columns
     are stored as NULL / 0.0.
+
+    The customer's delivery point is stored (delivery_lat/lng/address) so
+    tracking, the rider route, and the ETA all use the real drop-off point.
+    None leaves the columns NULL (callers fall back to the default home).
     """
     subtotal = sum(quantity * price for _, quantity, price in items)
     total = max(0.0, subtotal - discount_amount)
     cur = conn.execute(
-        "INSERT INTO orders (customer_id, restaurant_id, total, coupon_code, discount_amount) "
-        "VALUES (%s, %s, %s, %s, %s)",
-        (customer_id, restaurant_id, total, coupon_code, discount_amount),
+        "INSERT INTO orders (customer_id, restaurant_id, total, coupon_code, discount_amount, "
+        "delivery_lat, delivery_lng, delivery_address) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+        (customer_id, restaurant_id, total, coupon_code, discount_amount,
+         delivery_lat, delivery_lng, delivery_address),
     )
     order_id = cur.lastrowid
     for menu_item_id, quantity, price in items:
@@ -319,6 +336,16 @@ def create_order(
         )
     conn.commit()
     return order_id
+
+
+def get_order_delivery_location(conn: Connection, order_id: int) -> Optional[tuple]:
+    """Return the customer's stored delivery point for an order:
+    (delivery_lat, delivery_lng, delivery_address) or None when unset."""
+    cur = conn.execute(
+        "SELECT delivery_lat, delivery_lng, delivery_address FROM orders WHERE id = %s",
+        (order_id,),
+    )
+    return cur.fetchone()
 
 
 def update_order_status(conn: Connection, order_id: int, status: str) -> None:

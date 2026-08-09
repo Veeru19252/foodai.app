@@ -52,6 +52,7 @@ from database import (
     get_orders_for_customer,
     get_orders_for_restaurant,
     get_order_items,
+    get_order_delivery_location,
     assign_delivery,
     get_assigned_delivery_for_order,
     get_available_delivery_drivers,
@@ -122,6 +123,18 @@ def add_to_cart(menu_item_id: int, name: str, price: float) -> None:
 def cart_total(cart: dict) -> float:
     """Return the total price of all cart items."""
     return sum(item["price"] * item["quantity"] for item in cart.values())
+
+
+def _delivery_end_coordinates(loc: Optional[tuple]) -> tuple[float, float]:
+    """Return the customer's drop-off point for an order location.
+
+    ``loc`` is a ``get_order_delivery_location`` row (lat, lng, address) or
+    None; missing coordinates fall back to the default customer home so old
+    orders keep working without stored locations.
+    """
+    if loc is not None and loc[0] is not None and loc[1] is not None:
+        return (float(loc[0]), float(loc[1]))
+    return tracking.customer_home_coordinates()
 
 
 def _advance_order_status(
@@ -379,8 +392,32 @@ def show_cart_page(user) -> None:
                 st.session_state.pop("promo", None)
                 st.rerun()
 
-        st.subheader("Delivery address")
+        st.subheader("Delivery location")
+        preset_labels = [label for label, _addr, _coords in tracking.DELIVERY_PRESETS]
+        preset = st.selectbox("Choose a delivery area", preset_labels, key="delivery_preset")
+        preset_coords = tracking.preset_coordinates(preset)
+        m = folium.Map(location=preset_coords, zoom_start=14)
+        folium.Marker(
+            preset_coords,
+            tooltip="Suggested drop-off",
+            icon=folium.Icon(color="purple"),
+        ).add_to(m)
+        # Clicking the map refines the drop-off point beyond the preset.
+        clicked = st_folium(
+            m,
+            key="delivery_location_map",
+            use_container_width=True,
+            height=300,
+            returned_objects=["last_clicked"],
+        )
+        map_click = (clicked or {}).get("last_clicked") if clicked is not None else None
         address = st.text_input("Address", value="Hostel Block C, MG Road")
+        location = tracking.resolve_delivery_location(preset, map_click, address)
+        st.session_state["delivery_location"] = location
+        st.caption(
+            f"Delivering to **{location['address']}** "
+            f"({location['lat']:.4f}, {location['lng']:.4f})"
+        )
 
         if st.button("Place Order"):
             # Find this customer's restaurant (all items belong to one cart, so we
@@ -395,6 +432,14 @@ def show_cart_page(user) -> None:
                 (item_id, item["quantity"], item["price"])
                 for item_id, item in cart.items()
             ]
+            location = st.session_state.get("delivery_location") or (
+                tracking.resolve_delivery_location(preset, None, address)
+            )
+            delivery_kwargs = dict(
+                delivery_lat=location["lat"],
+                delivery_lng=location["lng"],
+                delivery_address=location["address"],
+            )
             conn = get_connection()
             if promo is not None:
                 # Clamp the stored discount against the current subtotal so it can
@@ -407,12 +452,13 @@ def show_cart_page(user) -> None:
                     items,
                     coupon_code=promo["code"],
                     discount_amount=order_discount,
+                    **delivery_kwargs,
                 )
                 # Usage is counted only after the order is actually created.
                 if promo.get("promo_id") is not None:
                     increment_promo_usage(conn, promo["promo_id"])
             else:
-                order_id = create_order(conn, user[0], restaurant_id, items)
+                order_id = create_order(conn, user[0], restaurant_id, items, **delivery_kwargs)
             conn.close()
 
             st.success(f"✅ Order #{order_id} placed! Status: PLACED")
@@ -560,18 +606,21 @@ def show_delivery_panel(user) -> None:
         delivered_time,
     ) = delivery
 
-    # Resolve the restaurant id for route coordinates.
+    # Resolve the restaurant id and the customer's stored delivery point.
     conn = get_connection()
-    cur = conn.execute("SELECT restaurant_id FROM orders WHERE id = %s", (order_id,))
-    rest_row = cur.fetchone()
+    row = conn.execute(
+        "SELECT restaurant_id, delivery_lat, delivery_lng, delivery_address "
+        "FROM orders WHERE id = %s",
+        (order_id,),
+    ).fetchone()
     conn.close()
-    if rest_row is None:
+    if row is None:
         st.error(f"Order #{order_id} not found.")
         return
 
-    restaurant_id = rest_row[0]
+    restaurant_id, delivery_lat, delivery_lng, delivery_address = row
     start = tracking.restaurant_coordinates(restaurant_id)
-    end = tracking.customer_home_coordinates()
+    end = _delivery_end_coordinates((delivery_lat, delivery_lng, delivery_address))
     route = tracking.build_route(start, end)
 
     # Route card: restaurant -> customer, wrapping the live delivery flow.
@@ -621,7 +670,7 @@ def show_delivery_panel(user) -> None:
         log_trip_position(conn, delivery_id, *rider_position)
         conn.close()
 
-    eta_min, eta_source = eta_service.best_eta(route, progress, restaurant_id)
+    eta_min, eta_source = eta_service.best_eta(route, progress, restaurant_id, customer_home=end)
     st.metric("Estimated arrival", tracking.format_eta(eta_min))
     st.caption("AI-predicted ETA" if eta_source == "ml" else "Estimated ETA")
 
@@ -702,18 +751,21 @@ def show_customer_tracking(user) -> None:
     # key distinct from the delivery panel's.
     st_autorefresh(interval=2500, key="customer_tracking_autorefresh")
 
-    # Resolve the restaurant id for route coordinates.
+    # Resolve the restaurant id and the customer's stored delivery point.
     conn = get_connection()
-    cur = conn.execute("SELECT restaurant_id FROM orders WHERE id = %s", (order_id,))
-    rest_row = cur.fetchone()
+    row = conn.execute(
+        "SELECT restaurant_id, delivery_lat, delivery_lng, delivery_address "
+        "FROM orders WHERE id = %s",
+        (order_id,),
+    ).fetchone()
     conn.close()
-    if rest_row is None:
+    if row is None:
         st.error(f"Order #{order_id} not found.")
         return
 
-    restaurant_id = rest_row[0]
+    restaurant_id, delivery_lat, delivery_lng, delivery_address = row
     start = tracking.restaurant_coordinates(restaurant_id)
-    end = tracking.customer_home_coordinates()
+    end = _delivery_end_coordinates((delivery_lat, delivery_lng, delivery_address))
     route = tracking.build_route(start, end)
 
     # Rider position: use the latest logged GPS point, else the restaurant.
@@ -727,6 +779,8 @@ def show_customer_tracking(user) -> None:
     rider_pos = (latest[0], latest[1]) if latest is not None else start
 
     st.write(f"**{restaurant_name}** — Status: **{status}**")
+    if delivery_address:
+        st.caption(f"Delivering to: {delivery_address}")
 
     # Order progress timeline: PLACED -> CONFIRMED -> PREPARING -> OUT_FOR_DELIVERY -> DELIVERED.
     status_flow = ["PLACED", "CONFIRMED", "PREPARING", "OUT_FOR_DELIVERY", "DELIVERED"]
@@ -793,7 +847,7 @@ def show_customer_tracking(user) -> None:
     else:
         progress = 0.0
 
-    eta_min, eta_source = eta_service.best_eta(route, progress, restaurant_id)
+    eta_min, eta_source = eta_service.best_eta(route, progress, restaurant_id, customer_home=end)
     st.metric("Estimated arrival", tracking.format_eta(eta_min))
     st.caption("AI-predicted ETA" if eta_source == "ml" else "Estimated ETA")
 

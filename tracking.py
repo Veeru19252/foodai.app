@@ -23,6 +23,7 @@ How to test (no third-party packages needed)
 from __future__ import annotations
 
 import math
+from typing import Optional
 
 # Bengaluru city center, used as a generic fallback / reference point.
 BENGALURU_CENTER = (12.9716, 77.5946)
@@ -42,8 +43,20 @@ COORDINATES = {
     5: (12.970, 77.750),   # Burger Barn, Tech Park (Whitefield)
 }
 
-# Fixed customer delivery point near Indiranagar.
+# Fixed customer delivery point near Indiranagar (fallback when an order has
+# no stored delivery location).
 DEFAULT_CUSTOMER_HOME = (12.9719, 77.6412)
+
+# Preset delivery areas a customer can pick at checkout. Each entry is
+# (label, default address, (lat, lng)); the coordinates sit inside the same
+# Bengaluru bbox as the restaurant COORDINATES.
+DELIVERY_PRESETS = [
+    ("MG Road / Indiranagar", "Hostel Block C, MG Road", (12.9719, 77.6412)),
+    ("Koramangala", "5th Block, Koramangala", (12.9352, 77.6245)),
+    ("HSR Layout", "Sector 1, HSR Layout", (12.9116, 77.6387)),
+    ("Whitefield", "ITPL Main Road, Whitefield", (12.9698, 77.7500)),
+    ("City Center", "MG Road Metro, City Center", (12.9770, 77.5960)),
+]
 
 
 def restaurant_coordinates(restaurant_id: int) -> tuple[float, float]:
@@ -57,8 +70,49 @@ def restaurant_coordinates(restaurant_id: int) -> tuple[float, float]:
 
 
 def customer_home_coordinates() -> tuple[float, float]:
-    """Return the fixed customer home coordinates (near Indiranagar)."""
+    """Return the fallback customer home coordinates (near Indiranagar)."""
     return DEFAULT_CUSTOMER_HOME
+
+
+def preset_coordinates(label: str) -> tuple[float, float]:
+    """Return (lat, lng) for a DELIVERY_PRESETS label, raising ValueError if unknown."""
+    for preset_label, _address, coords in DELIVERY_PRESETS:
+        if preset_label == label:
+            return coords
+    raise ValueError(
+        f"Unknown delivery preset {label!r}; expected one of {[p[0] for p in DELIVERY_PRESETS]}."
+    )
+
+
+def resolve_delivery_location(
+    preset_label: Optional[str],
+    map_click: Optional[dict],
+    address_input: Optional[str],
+) -> dict:
+    """Resolve the customer's chosen delivery point into a location dict.
+
+    Returns {"address": str, "lat": float, "lng": float}. A map click overrides
+    the preset; when neither is available it falls back to the first preset's
+    coordinates. The address comes from the text input, or the preset's default
+    address / a generic label for custom clicks.
+    """
+    if (
+        map_click is not None
+        and map_click.get("lat") is not None
+        and map_click.get("lng") is not None
+    ):
+        address = (address_input or "").strip() or "Custom delivery point"
+        return {
+            "address": address,
+            "lat": float(map_click["lat"]),
+            "lng": float(map_click["lng"]),
+        }
+    label = preset_label or DELIVERY_PRESETS[0][0]
+    lat, lng = preset_coordinates(label)
+    address = (address_input or "").strip() or next(
+        preset_address for l, preset_address, _coords in DELIVERY_PRESETS if l == label
+    )
+    return {"address": address, "lat": lat, "lng": lng}
 
 
 def build_route(

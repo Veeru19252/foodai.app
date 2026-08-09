@@ -179,12 +179,16 @@ def best_eta(
     progress: float,
     restaurant_id: int,
     prep_time_min: float = 15,
+    customer_home: Optional[tuple[float, float]] = None,
 ) -> tuple[float, str]:
     """Return (eta_minutes, source), preferring the ML model when available.
 
     With a model, predicts the full-trip minutes from route length and prep
     time, then scales by the remaining fraction ``1 - progress``. Without one,
     delegates to ``tracking.compute_eta``'s distance/speed formula.
+
+    ``customer_home`` is the order's delivery point and feeds the zone
+    one-hot encoding; it defaults to ``tracking.DEFAULT_CUSTOMER_HOME``.
     """
     if load_model() is None:
         return (
@@ -196,6 +200,7 @@ def best_eta(
         restaurant_id,
         distance_km=tracking.route_length_km(route),
         prep_time_min=prep_time_min,
+        customer_home=customer_home,
     )
     ml_full = predict_eta(full_trip_feats)
     if ml_full is None:  # defensive: model vanished between checks
