@@ -25,6 +25,7 @@ import eta_service
 import explain_service
 import folium
 import forecast_service
+import maps
 import plotly.express as px
 import pymysql
 import streamlit as st
@@ -396,24 +397,52 @@ def show_cart_page(user) -> None:
         preset_labels = [label for label, _addr, _coords in tracking.DELIVERY_PRESETS]
         preset = st.selectbox("Choose a delivery area", preset_labels, key="delivery_preset")
         preset_coords = tracking.preset_coordinates(preset)
-        m = folium.Map(location=preset_coords, zoom_start=14)
-        folium.Marker(
-            preset_coords,
-            tooltip="Suggested drop-off",
-            icon=folium.Icon(color="purple"),
-        ).add_to(m)
+        address = st.text_input("Address", value="Hostel Block C, MG Road")
+
+        # Current delivery point: whatever was last stored, else the preset.
+        current = st.session_state.get("delivery_location")
+        current_coords = (
+            (current["lat"], current["lng"])
+            if current is not None
+            else preset_coords
+        )
+
+        # Google-Maps-style route preview from this cart's restaurant to the
+        # delivery point, when the restaurant can be resolved.
+        preview_route = None
+        cart_restaurant_id = _find_cart_restaurant(cart)
+        if cart_restaurant_id is not None:
+            preview_route = tracking.build_route(
+                tracking.restaurant_coordinates(cart_restaurant_id),
+                current_coords,
+            )
+
+        m = maps.build_picker_map(current_coords, route=preview_route)
         # Clicking the map refines the drop-off point beyond the preset.
         clicked = st_folium(
             m,
             key="delivery_location_map",
             use_container_width=True,
-            height=300,
+            height=320,
             returned_objects=["last_clicked"],
         )
         map_click = (clicked or {}).get("last_clicked") if clicked is not None else None
-        address = st.text_input("Address", value="Hostel Block C, MG Road")
-        location = tracking.resolve_delivery_location(preset, map_click, address)
-        st.session_state["delivery_location"] = location
+
+        # Persist a click immediately and re-render once so the pin and route
+        # jump to the tapped point (guard prevents a click-rerun loop).
+        if map_click is not None and (
+            current is None
+            or abs(current["lat"] - float(map_click["lat"])) > 1e-6
+            or abs(current["lng"] - float(map_click["lng"])) > 1e-6
+        ):
+            st.session_state["delivery_location"] = tracking.resolve_delivery_location(
+                preset, map_click, address
+            )
+            st.rerun()
+
+        location = st.session_state.get("delivery_location") or (
+            tracking.resolve_delivery_location(preset, None, address)
+        )
         st.caption(
             f"Delivering to **{location['address']}** "
             f"({location['lat']:.4f}, {location['lng']:.4f})"
@@ -626,6 +655,8 @@ def show_delivery_panel(user) -> None:
     # Route card: restaurant -> customer, wrapping the live delivery flow.
     st.markdown('<div class="order-card">', unsafe_allow_html=True)
     st.write(f"**{restaurant_name}** → **{customer_name}**")
+    distance = tracking.format_distance(tracking.route_length_km(route))
+    st.caption(f"📍 {distance} to drop-off")
 
     # Not picked up yet: show the start button and stop.
     if pickup_time is None:
@@ -677,30 +708,13 @@ def show_delivery_panel(user) -> None:
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="menu-card">', unsafe_allow_html=True)
-    m = folium.Map(location=start, zoom_start=13)
-    folium.PolyLine(route, color="blue", weight=3).add_to(m)
-    folium.Marker(
+    m = maps.build_delivery_map(
         start,
-        popup=restaurant_name,
-        tooltip="Restaurant",
-        icon=folium.Icon(color="green"),
-    ).add_to(m)
-    folium.Marker(
-        rider_position,
-        popup="Rider",
-        tooltip="Rider",
-        icon=folium.Icon(color="red", icon="motorcycle"),
-    ).add_to(m)
-    folium.Marker(
         end,
-        popup=customer_name,
-        tooltip="Customer",
-        icon=folium.Icon(color="purple"),
-    ).add_to(m)
-
-    lats = [point[0] for point in route]
-    lngs = [point[1] for point in route]
-    m.fit_bounds([[min(lats), min(lngs)], [max(lats), max(lngs)]], padding=(20, 20))
+        restaurant_name,
+        receiver_name=customer_name,
+        rider_pos=rider_position,
+    )
     # returned_objects=[] keeps the map read-only (no click-driven reruns).
     st_folium(
         m,
@@ -779,37 +793,23 @@ def show_customer_tracking(user) -> None:
     rider_pos = (latest[0], latest[1]) if latest is not None else start
 
     st.write(f"**{restaurant_name}** — Status: **{status}**")
+    distance = tracking.format_distance(tracking.route_length_km(route))
     if delivery_address:
-        st.caption(f"Delivering to: {delivery_address}")
+        st.caption(f"📍 Delivering to {delivery_address} · {distance} away")
+    else:
+        st.caption(f"📍 Delivering to you · {distance} away")
 
     # Order progress timeline: PLACED -> CONFIRMED -> PREPARING -> OUT_FOR_DELIVERY -> DELIVERED.
     status_flow = ["PLACED", "CONFIRMED", "PREPARING", "OUT_FOR_DELIVERY", "DELIVERED"]
     st.markdown(status_stepper(status_flow, status), unsafe_allow_html=True)
 
-    m = folium.Map(location=tracking.BENGALURU_CENTER, zoom_start=13)
-    folium.PolyLine(route, color="blue", weight=3).add_to(m)
-    folium.Marker(
+    m = maps.build_delivery_map(
         start,
-        popup=restaurant_name,
-        tooltip="Restaurant",
-        icon=folium.Icon(color="green"),
-    ).add_to(m)
-    folium.Marker(
-        rider_pos,
-        popup="Delivery partner",
-        tooltip="Rider",
-        icon=folium.Icon(color="red", icon="motorcycle"),
-    ).add_to(m)
-    folium.Marker(
         end,
-        popup="You",
-        tooltip="Your location",
-        icon=folium.Icon(color="purple"),
-    ).add_to(m)
-
-    lats = [point[0] for point in route]
-    lngs = [point[1] for point in route]
-    m.fit_bounds([[min(lats), min(lngs)], [max(lats), max(lngs)]], padding=(20, 20))
+        restaurant_name,
+        receiver_name=delivery_address or "You",
+        rider_pos=rider_pos,
+    )
     # returned_objects=[] keeps the map read-only (no click-driven reruns).
     st.markdown('<div class="menu-card">', unsafe_allow_html=True)
     st_folium(
@@ -882,20 +882,6 @@ def show_customer_tracking(user) -> None:
 
 
 # ---------- admin dashboard ----------
-
-def _demand_bucket_color(demand: float) -> str:
-    """Return the heatmap fill color for a predicted order count.
-
-    Buckets: <2 green, 2-4 yellow, 4-6 orange, >6 red.
-    """
-    if demand < 2:
-        return "green"
-    if demand < 4:
-        return "yellow"
-    if demand < 6:
-        return "orange"
-    return "red"
-
 
 def _today_orders_per_zone(conn: Connection) -> dict[str, list[int]]:
     """Return today's order counts per zone, bucketed by hour.
@@ -1015,20 +1001,7 @@ def show_admin_dashboard() -> None:
         prev_counts_by_zone,
     )
 
-    m = folium.Map(location=tracking.BENGALURU_CENTER, zoom_start=13)
-    for zone, anchor in eta_service.ZONE_ANCHORS.items():
-        demand = predicted.get(zone, 0.0)
-        folium.CircleMarker(
-            location=anchor,
-            radius=14,
-            popup=f"Zone {zone}: {demand:.1f} predicted orders",
-            tooltip=f"Zone {zone}",
-            fill=True,
-            fill_color=_demand_bucket_color(demand),
-            fill_opacity=0.75,
-            color="black",
-            weight=1,
-        ).add_to(m)
+    m = maps.build_demand_map(eta_service.ZONE_ANCHORS, predicted)
 
     legend_html = """
     <div style="position: fixed; bottom: 30px; left: 30px; z-index: 9999;
