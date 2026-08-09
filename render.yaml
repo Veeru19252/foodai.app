@@ -1,0 +1,52 @@
+# Render Blueprint — one-click deploy for FoodAI (FastAPI + Next.js + Postgres)
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Connecting this repo to Render provisions three services:
+#   - foodai-db        PostgreSQL 16 (free plan — data expires after 30 days;
+#                      upgrade to the paid plan for persistent storage)
+#   - foodai-backend   FastAPI on https://foodai-backend.onrender.com
+#   - foodai-frontend  Next.js on https://foodai-frontend.onrender.com
+#
+# The URLs below assume the service names are kept exactly as written. If Render
+# assigns a different URL, update NEXT_PUBLIC_API_URL + CORS_ORIGINS to match.
+
+databases:
+  - name: foodai-db
+    databaseName: foodai
+    user: foodai
+    plan: free
+    ipAllowList: [] # private connections only
+
+services:
+  - type: web
+    name: foodai-backend
+    runtime: python
+    plan: free
+    rootDir: .
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: foodai-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: "https://foodai-frontend.onrender.com"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: "3.9"
+
+  - type: web
+    name: foodai-frontend
+    runtime: node
+    plan: free
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: "https://foodai-backend.onrender.com"
+      - key: NODE_VERSION
+        value: "20"

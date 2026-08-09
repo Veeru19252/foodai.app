@@ -22,12 +22,14 @@ from backend.db import Base
 target_metadata = Base.metadata
 
 # Allow sqlalchemy.url to be overridden with the DATABASE_URL env var
-# (used for the foodai_test database in CI/local).
+# (used for the foodai_test database in CI/local, and the hosted DB in prod).
 import os  # noqa: E402
+
+from backend.config import _normalize_database_url  # noqa: E402
 
 database_url = os.getenv("DATABASE_URL")
 if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+    config.set_main_option("sqlalchemy.url", _normalize_database_url(database_url))
 
 
 def run_migrations_offline() -> None:

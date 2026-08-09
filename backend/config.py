@@ -12,11 +12,26 @@ in any shared deployment.
 
 import os
 
+
+def _normalize_database_url(url: str) -> str:
+    """Normalize hosted-DB URLs for SQLAlchemy 2.x.
+
+    Render/Railway/Heroku expose ``postgres://...`` URLs, but SQLAlchemy 2.x
+    removed the bare ``postgres`` dialect. Rewrite to the psycopg2 dialect so
+    the same DATABASE_URL works locally, in Docker and in the cloud.
+    """
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+psycopg2://", 1)
+    return url
+
+
 # Local development PostgreSQL (see brew install postgresql@16, DB created with
 # user foodai / password foodai_pass). Override with DATABASE_URL in prod.
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg2://foodai:foodai_pass@127.0.0.1:5432/foodai",
+DATABASE_URL = _normalize_database_url(
+    os.getenv(
+        "DATABASE_URL",
+        "postgresql+psycopg2://foodai:foodai_pass@127.0.0.1:5432/foodai",
+    )
 )
 
 JWT_SECRET = os.getenv("JWT_SECRET", "foodai-dev-secret-change-me")

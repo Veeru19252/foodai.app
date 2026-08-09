@@ -492,6 +492,35 @@ Runs Alembic migrations automatically; demo data is seeded on first boot.
 - **Testing** — `pytest tests/ -q` (backend, 42 tests), `cd frontend && npm run
   build`, `npx playwright test` (4 e2e flows).
 
+### Deploy to Render (one-click, current)
+
+[`render.yaml`](./render.yaml) is a Render Blueprint that provisions the whole
+stack (Postgres 16 + FastAPI + Next.js) from this repo:
+
+1. Push this repo to GitHub (already done — `main`).
+2. Open [render.com](https://render.com) → **New** → **Blueprint** →
+   connect the `foodai.app` repo.
+3. Render reads `render.yaml`, provisions `foodai-db`,
+   `foodai-backend` and `foodai-frontend`, and auto-deploys on every push to
+   `main`.
+
+Expected URLs (with the default service names):
+
+| Service | URL |
+|---|---|
+| Frontend | `https://foodai-frontend.onrender.com` |
+| Backend (API docs) | `https://foodai-backend.onrender.com/docs` |
+
+Notes:
+
+- The backend applies Alembic migrations (`alembic upgrade head`) and seeds the
+  demo accounts on first boot.
+- Free-tier web services spin down after ~15 min idle (first request takes a
+  few seconds to wake up), and free Postgres data expires after 30 days —
+  upgrade the database plan for a persistent demo.
+- If Render assigns different service URLs, update `NEXT_PUBLIC_API_URL` (on
+  the frontend) and `CORS_ORIGINS` (on the backend) accordingly.
+
 ---
 
 ## 🚀 Deploy to Hugging Face Spaces
