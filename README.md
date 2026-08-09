@@ -223,14 +223,23 @@ Update an order's status (`PLACED → CONFIRMED → PREPARING → OUT_FOR_DELIVE
 
 ## ⚙️ Configuration
 
-All configuration lives at the top of the source files (no `.env` needed for the starter):
+Database connection settings are read from a local `.env` file (gitignored) via `config.py`:
 
 | Setting | Location | Default |
 |---|---|---|
-| Database path | `database.py` → `DB_PATH` | `foodai.db` (next to project) |
+| MySQL host | `config.py` → `.env` | `127.0.0.1` |
+| MySQL port | `config.py` → `.env` | `3306` |
+| MySQL user | `config.py` → `.env` | `root` |
+| MySQL password | `config.py` → `.env` (e.g. `MYSQL_PASSWORD=...`) | *(empty)* |
+| MySQL database | `config.py` → `.env` | `foodai` |
 | Auto-refresh interval | `app.py` (live tracking) | 2 seconds |
 | Random seed (ML) | Person B notebooks | `random_state=42` |
 | Model files | `models/` | `eta_model.joblib` |
+
+The app connects to a local MySQL server (`pymysql`), auto-creates the `foodai`
+database and tables on first boot (`database.init_db`), and seeds demo data
+(`seed_data.seed_all`). The `foodai` DB must exist or be creatable by the
+configured user.
 
 ---
 
@@ -394,7 +403,7 @@ pytest tests/
 
    **Alternative:** upload the files via the web UI (Files tab → Add file → Upload files).
 4. **Files that MUST be committed:** `app.py`, `database.py`, `seed_data.py`, `tracking.py`, `eta_service.py`, `forecast_service.py`, `explain_service.py`, `requirements.txt`, `.streamlit/config.toml`, `setup.sh`, `models/eta_model.joblib`, `models/forecast_model.joblib`, `models/forecast_meta.json`.
-5. **Note:** `foodai.db` is gitignored (`*.db`) — the app auto-creates + seeds the database on first boot (an empty demo DB gets seeded automatically). `outputs/` and `data/` are optional.
+5. **Note:** `foodai.db` is no longer used — the app now uses a local **MySQL** database (see ⚙️ Configuration; credentials go in the gitignored `.env`). The app auto-creates + seeds the database on first boot (an empty demo DB gets seeded automatically). `outputs/` and `data/` are optional.
 
 ---
 

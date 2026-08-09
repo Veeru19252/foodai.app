@@ -17,7 +17,6 @@ Next steps in your roadmap:
 """
 
 import hashlib
-import sqlite3
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -27,8 +26,10 @@ import explain_service
 import folium
 import forecast_service
 import plotly.express as px
+import pymysql
 import streamlit as st
 import tracking
+from pymysql.err import IntegrityError
 from streamlit_autorefresh import st_autorefresh
 from streamlit_folium import st_folium
 
@@ -41,6 +42,7 @@ st.set_page_config(
 
 
 from database import (
+    Connection,
     get_connection,
     get_restaurants,
     get_menu,
@@ -86,7 +88,7 @@ def login(email: str, password: str) -> Optional[tuple]:
 
 
 def register_user(
-    conn: sqlite3.Connection, name: str, email: str, password: str
+    conn: Connection, name: str, email: str, password: str
 ) -> tuple[bool, str]:
     """Create a customer account. Returns (success, message).
 
@@ -103,7 +105,7 @@ def register_user(
     password_hash = hashlib.sha256(password.encode()).hexdigest()
     try:
         create_user(conn, name, email, password_hash, "customer")
-    except sqlite3.IntegrityError:
+    except IntegrityError:
         return False, "An account with this email already exists."
     return True, "Account created! Please log in."
 
@@ -123,7 +125,7 @@ def cart_total(cart: dict) -> float:
 
 
 def _advance_order_status(
-    conn: sqlite3.Connection, order_id: int, next_status: str
+    conn: Connection, order_id: int, next_status: str
 ) -> bool:
     """Advance an order's status; returns whether the advance happened.
 
@@ -142,12 +144,12 @@ def _advance_order_status(
     return True
 
 
-def _assigned_driver_name(conn: sqlite3.Connection, order_id: int) -> Optional[str]:
+def _assigned_driver_name(conn: Connection, order_id: int) -> Optional[str]:
     """Return the delivery driver's name for an order, or None if unassigned."""
     delivery = get_assigned_delivery_for_order(conn, order_id)
     if delivery is None:
         return None
-    cur = conn.execute("SELECT name FROM users WHERE id = ?", (delivery[1],))
+    cur = conn.execute("SELECT name FROM users WHERE id = %s", (delivery[1],))
     row = cur.fetchone()
     return row[0] if row is not None else None
 
@@ -429,7 +431,7 @@ def _find_cart_restaurant(cart: dict) -> Optional[int]:
         conn.close()
         return None
     cur = conn.execute(
-        "SELECT restaurant_id FROM menu_items WHERE id = ?", (first_item_id,)
+        "SELECT restaurant_id FROM menu_items WHERE id = %s", (first_item_id,)
     )
     row = cur.fetchone()
     conn.close()
@@ -560,7 +562,7 @@ def show_delivery_panel(user) -> None:
 
     # Resolve the restaurant id for route coordinates.
     conn = get_connection()
-    cur = conn.execute("SELECT restaurant_id FROM orders WHERE id = ?", (order_id,))
+    cur = conn.execute("SELECT restaurant_id FROM orders WHERE id = %s", (order_id,))
     rest_row = cur.fetchone()
     conn.close()
     if rest_row is None:
@@ -702,7 +704,7 @@ def show_customer_tracking(user) -> None:
 
     # Resolve the restaurant id for route coordinates.
     conn = get_connection()
-    cur = conn.execute("SELECT restaurant_id FROM orders WHERE id = ?", (order_id,))
+    cur = conn.execute("SELECT restaurant_id FROM orders WHERE id = %s", (order_id,))
     rest_row = cur.fetchone()
     conn.close()
     if rest_row is None:
@@ -841,7 +843,7 @@ def _demand_bucket_color(demand: float) -> str:
     return "red"
 
 
-def _today_orders_per_zone(conn: sqlite3.Connection) -> dict[str, list[int]]:
+def _today_orders_per_zone(conn: Connection) -> dict[str, list[int]]:
     """Return today's order counts per zone, bucketed by hour.
 
     orders table has no zone column; derive zone from restaurant coordinates.
@@ -854,7 +856,7 @@ def _today_orders_per_zone(conn: sqlite3.Connection) -> dict[str, list[int]]:
         """
         SELECT restaurant_id, created_at
         FROM orders
-        WHERE date(created_at) = date('now')
+        WHERE DATE(created_at) = CURDATE()
         """
     ).fetchall()
     if not rows:

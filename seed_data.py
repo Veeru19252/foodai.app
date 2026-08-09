@@ -85,11 +85,11 @@ def seed_users(conn) -> None:
     """Insert demo users (skip if the email already exists)."""
     for name, email, password, role in USERS:
         exists = conn.execute(
-            "SELECT 1 FROM users WHERE email = ?", (email,)
+            "SELECT 1 FROM users WHERE email = %s", (email,)
         ).fetchone()
         if not exists:
             conn.execute(
-                "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
+                "INSERT INTO users (name, email, password_hash, role) VALUES (%s, %s, %s, %s)",
                 (name, email, _hash_password(password), role),
             )
     conn.commit()
@@ -99,26 +99,26 @@ def seed_restaurants(conn) -> None:
     """Insert demo restaurants with their menus (skip if already seeded)."""
     for name, address, cuisine, menu in RESTAURANTS:
         exists = conn.execute(
-            "SELECT 1 FROM restaurants WHERE name = ?", (name,)
+            "SELECT 1 FROM restaurants WHERE name = %s", (name,)
         ).fetchone()
         if exists:
             continue
         # Find this restaurant's owner by matching the demo email (e.g. spice@foodai.com)
         owner_email = name.split()[0].lower() + "@foodai.com"
         owner = conn.execute(
-            "SELECT id FROM users WHERE email = ?", (owner_email,)
+            "SELECT id FROM users WHERE email = %s", (owner_email,)
         ).fetchone()
         owner_id = owner[0] if owner else conn.execute(
             "SELECT id FROM users WHERE role = 'admin' LIMIT 1"
         ).fetchone()[0]
         cur = conn.execute(
-            "INSERT INTO restaurants (user_id, name, address, cuisine, rating) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO restaurants (user_id, name, address, cuisine, rating) VALUES (%s, %s, %s, %s, %s)",
             (owner_id, name, address, cuisine, 4.0),
         )
         restaurant_id = cur.lastrowid
         for item_name, price, prep in menu:
             conn.execute(
-                "INSERT INTO menu_items (restaurant_id, name, price, prep_time_min) VALUES (?, ?, ?, ?)",
+                "INSERT INTO menu_items (restaurant_id, name, price, prep_time_min) VALUES (%s, %s, %s, %s)",
                 (restaurant_id, item_name, price, prep),
             )
     conn.commit()
@@ -129,13 +129,13 @@ def seed_promos(conn) -> None:
     for (code, description, discount_type, discount_value, min_order_value,
          max_discount, valid_until, usage_limit, times_used, active) in PROMOS:
         exists = conn.execute(
-            "SELECT 1 FROM promo_codes WHERE code = ?", (code,)
+            "SELECT 1 FROM promo_codes WHERE code = %s", (code,)
         ).fetchone()
         if not exists:
             conn.execute(
                 "INSERT INTO promo_codes (code, description, discount_type, discount_value, "
                 "min_order_value, max_discount, valid_until, usage_limit, times_used, active) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (code, description, discount_type, discount_value, min_order_value,
                  max_discount, valid_until, usage_limit, times_used, active),
             )
