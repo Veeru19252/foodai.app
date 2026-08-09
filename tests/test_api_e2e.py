@@ -383,6 +383,96 @@ def test_admin_role_update(client):
     assert resp.status_code == 403
 
 
+def test_auto_assign(client):
+    customer_token = login(client, "customer@foodai.com")["access_token"]
+    customer_headers = {"Authorization": f"Bearer {customer_token}"}
+    resp = client.post(
+        "/orders",
+        json={"restaurant_id": 1, "items": [{"menu_item_id": 2, "quantity": 1}]},
+        headers=customer_headers,
+    )
+    order_id = resp.json()["id"]
+
+    owner_token = login(client, "spice@foodai.com")["access_token"]
+    resp = client.post(
+        f"/orders/{order_id}/auto-assign",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["delivery_id"]
+    assert body["driver_name"]
+    assert "Lowest load" in body["reason"]
+
+    # Already assigned -> idempotent.
+    resp = client.post(
+        f"/orders/{order_id}/auto-assign",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["delivery_id"] == body["delivery_id"]
+
+    # A customer cannot trigger auto-dispatch.
+    resp = client.post(
+        f"/orders/{order_id}/auto-assign",
+        headers=customer_headers,
+    )
+    assert resp.status_code == 403
+
+
+def test_order_nudge(client):
+    customer_token = login(client, "customer@foodai.com")["access_token"]
+    customer_headers = {"Authorization": f"Bearer {customer_token}"}
+    resp = client.post(
+        "/orders",
+        json={"restaurant_id": 2, "items": [{"menu_item_id": 6, "quantity": 1}]},
+        headers=customer_headers,
+    )
+    order_id = resp.json()["id"]
+
+    owner_token = login(client, "dosa@foodai.com")["access_token"]
+    resp = client.get(
+        f"/orders/{order_id}/nudge",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["risk"] in ("LOW", "MEDIUM", "HIGH")
+    assert "message" in body
+    assert body["eta_min"] is None or body["eta_min"] >= 0
+
+    # The customer cannot view the nudge (restaurant-side feature).
+    resp = client.get(
+        f"/orders/{order_id}/nudge",
+        headers=customer_headers,
+    )
+    assert resp.status_code == 403
+
+
+def test_driver_earnings(client):
+    token = login(client, "rider@foodai.com")["access_token"]
+    resp = client.get(
+        "/orders/driver/earnings",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_earnings"] >= 0
+    assert body["total_deliveries"] >= 0
+    assert body["completed_deliveries"] >= 0
+    assert body["per_delivery_rate"] == 60.0
+    assert body["per_km_rate"] == 12.0
+    assert isinstance(body["recent"], list)
+
+    # A customer cannot read driver earnings.
+    customer_token = login(client, "customer@foodai.com")["access_token"]
+    resp = client.get(
+        "/orders/driver/earnings",
+        headers={"Authorization": f"Bearer {customer_token}"},
+    )
+    assert resp.status_code == 403
+
+
 def test_tracking_includes_timeline(client):
     token = login(client, "customer@foodai.com")["access_token"]
     headers = {"Authorization": f"Bearer {token}"}

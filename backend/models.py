@@ -33,6 +33,8 @@ VALID_ORDER_STATUSES = (
     "DELIVERED",
     "CANCELLED",
 )
+VALID_PAYMENT_METHODS = ("COD", "RAZORPAY")
+VALID_PAYMENT_STATUSES = ("PENDING", "PAID", "FAILED", "REFUNDED")
 
 
 class User(Base):
@@ -85,9 +87,16 @@ class Order(Base):
     total = Column(Float, nullable=False, default=0.0)
     coupon_code = Column(String(255), nullable=True)
     discount_amount = Column(Float, nullable=False, default=0.0)
+    payment_method = Column(String(16), nullable=False, default="COD")
+    payment_status = Column(String(16), nullable=False, default="PENDING")
+    payment_id = Column(String(64), nullable=True)
     delivery_lat = Column(Float, nullable=True)
     delivery_lng = Column(Float, nullable=True)
     delivery_address = Column(String(255), nullable=True)
+    delivery_phone = Column(String(15), nullable=True)
+    delivery_city = Column(String(64), nullable=True)
+    delivery_state = Column(String(64), nullable=True)
+    delivery_pincode = Column(String(10), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     customer = relationship("User", foreign_keys=[customer_id])

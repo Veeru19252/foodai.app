@@ -209,6 +209,40 @@ export const ordersApi = {
       `/orders/${orderId}/assign`,
       { method: "POST", body: JSON.stringify({ driver_id: driverId }) }
     ),
+  autoAssign: (orderId: number) =>
+    api<{ delivery_id: number; driver_name: string; message: string; reason: string }>(
+      `/orders/${orderId}/auto-assign`,
+      { method: "POST" }
+    ),
+  nudge: (orderId: number) =>
+    api<{
+      order_id: number;
+      status: string;
+      delay_min: number;
+      risk: "LOW" | "MEDIUM" | "HIGH";
+      message: string;
+      eta_min: number | null;
+      progress: number;
+      elapsed_min?: number;
+    }>(`/orders/${orderId}/nudge`),
+  driverEarnings: () =>
+    api<{
+      per_delivery_rate: number;
+      per_km_rate: number;
+      total_earnings: number;
+      total_deliveries: number;
+      completed_deliveries: number;
+      active_deliveries: number;
+      recent: {
+        delivery_id: number;
+        order_id: number;
+        restaurant_name: string;
+        customer_name: string;
+        distance_km: number;
+        earned: number;
+        completed_at: string | null;
+      }[];
+    }>("/orders/driver/earnings"),
   updateStatus: (orderId: number, status: string) =>
     api<OrderDetail>(`/orders/${orderId}/status`, {
       method: "PATCH",

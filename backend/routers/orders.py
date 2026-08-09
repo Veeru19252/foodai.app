@@ -9,6 +9,7 @@ database.py (validate_promo_code / calculate_discount / increment usage).
 
 from datetime import date, datetime
 
+import tracking
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,7 @@ from backend.models import (
     OrderItem,
     PromoCode,
     Restaurant,
+    TripLog,
     User,
     VALID_ORDER_STATUSES,
 )
@@ -37,6 +39,7 @@ from backend.schemas import (
 )
 from backend.simulation import publish_sync
 from backend.security import get_current_user
+from backend.tracking_state import eta_for_order, order_route, rider_progress
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -200,6 +203,60 @@ def driver_orders(user: User = Depends(security.require_roles("delivery")), db: 
             "delivered_time": d.delivered_time,
         })
     return result
+
+
+PER_DELIVERY_RATE = 60.0
+PER_KM_RATE = 12.0
+
+
+@router.get("/driver/earnings")
+def driver_earnings(
+    user: User = Depends(security.require_roles("delivery")),
+    db: Session = Depends(get_db),
+):
+    """Driver earnings dashboard: flat rate per delivered order plus a
+    distance-based top-up, computed from completed deliveries only."""
+    deliveries = (
+        db.query(Delivery)
+        .filter(Delivery.driver_id == user.id)
+        .order_by(Delivery.id.desc())
+        .all()
+    )
+    completed = [d for d in deliveries if d.delivered_time is not None]
+    recent = []
+    total_earned = 0.0
+    for d in deliveries:
+        order = db.query(Order).filter(Order.id == d.order_id).first()
+        if order is None:
+            continue
+        try:
+            _route, distance_km = order_route(order)
+        except ValueError:
+            distance_km = 1.0
+        distance_km = max(distance_km, 1.0)
+        earned = PER_DELIVERY_RATE + PER_KM_RATE * distance_km
+        if d.delivered_time is not None:
+            total_earned += earned
+        recent.append({
+            "delivery_id": d.id,
+            "order_id": order.id,
+            "restaurant_name": order.restaurant.name if order.restaurant else "",
+            "customer_name": order.customer.name if order.customer else "",
+            "distance_km": round(distance_km, 2),
+            "earned": round(earned, 2) if d.delivered_time else 0.0,
+            "completed_at": d.delivered_time,
+        })
+    return {
+        "per_delivery_rate": PER_DELIVERY_RATE,
+        "per_km_rate": PER_KM_RATE,
+        "total_earnings": round(total_earned, 2),
+        "total_deliveries": len(deliveries),
+        "completed_deliveries": len(completed),
+        "active_deliveries": sum(
+            1 for d in deliveries if d.pickup_time is not None and d.delivered_time is None
+        ),
+        "recent": recent[:10],
+    }
 
 
 def _create_single_order(db: Session, user: User, payload: CreateOrderRequest) -> Order:
@@ -462,3 +519,183 @@ def assign_delivery(
         },
     )
     return {"delivery_id": delivery.id, "message": "Delivery assigned."}
+
+
+def _rider_last_position(db: Session, driver_id: int, fallback) -> tuple:
+    """Return the rider's last known position (latest TripLog), else fallback."""
+    log = (
+        db.query(TripLog)
+        .join(Delivery, Delivery.id == TripLog.delivery_id)
+        .filter(Delivery.driver_id == driver_id)
+        .order_by(TripLog.timestamp.desc())
+        .first()
+    )
+    if log is None:
+        return fallback
+    return (log.lat, log.lng)
+
+
+def _rider_load(db: Session, driver_id: int) -> dict:
+    deliveries = db.query(Delivery).filter(Delivery.driver_id == driver_id).all()
+    active = sum(1 for d in deliveries if d.pickup_time is not None and d.delivered_time is None)
+    queued = sum(1 for d in deliveries if d.pickup_time is None)
+    return {"active": active, "queued": queued, "load": active * 2 + queued}
+
+
+@router.post("/{order_id}/auto-assign")
+def auto_assign_delivery(
+    order_id: int,
+    user: User = Depends(restaurant_or_admin),
+    db: Session = Depends(get_db),
+):
+    """Smart auto-dispatch: pick the rider with the lowest combined load and
+    distance-to-restaurant score (Swiggy-style smart allocation)."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found.")
+    if user.role == "restaurant" and order.restaurant_id not in [
+        r.id for r in user.restaurants
+    ]:
+        raise HTTPException(status_code=403, detail="Not your restaurant's order.")
+    existing = db.query(Delivery).filter(Delivery.order_id == order_id).first()
+    if existing is not None:
+        driver = db.query(User).filter(User.id == existing.driver_id).first()
+        return {
+            "delivery_id": existing.id,
+            "driver_name": driver.name if driver else "",
+            "message": "Delivery already assigned.",
+            "reason": "Rider already assigned to this order",
+        }
+
+    drivers = (
+        db.query(User)
+        .filter(User.role == "delivery")
+        .order_by(User.name)
+        .all()
+    )
+    if not drivers:
+        raise HTTPException(status_code=400, detail="No riders available.")
+
+    try:
+        restaurant_pos = tracking.restaurant_coordinates(order.restaurant_id)
+    except ValueError:
+        restaurant_pos = tracking.DEFAULT_CUSTOMER_HOME
+
+    best = None
+    for driver in drivers:
+        load = _rider_load(db, driver.id)
+        pos = _rider_last_position(db, driver.id, restaurant_pos)
+        dist_km = tracking.haversine_km(pos, restaurant_pos)
+        score = load["load"] + dist_km * 0.5
+        candidate = {
+            "driver": driver,
+            "load": load,
+            "dist_km": dist_km,
+            "score": score,
+        }
+        if best is None or score < best["score"]:
+            best = candidate
+
+    delivery = Delivery(order_id=order_id, driver_id=best["driver"].id)
+    db.add(delivery)
+    order.delivery_id = best["driver"].id
+    db.commit()
+    db.refresh(delivery)
+    publish_sync(
+        simulation.notifications_manager,
+        f"user:{best['driver'].id}",
+        {
+            "type": "delivery_assigned",
+            "order_id": order.id,
+            "restaurant_name": order.restaurant.name if order.restaurant else "Restaurant",
+            "customer_name": order.customer.name if order.customer else "Customer",
+            "message": f"New delivery assigned for order #{order.id}",
+        },
+    )
+    return {
+        "delivery_id": delivery.id,
+        "driver_name": best["driver"].name,
+        "message": "Rider auto-assigned.",
+        "reason": (
+            f"Lowest load ({best['load']['active']} active, {best['load']['queued']} queued) "
+            f"and {best['dist_km']:.1f} km from the restaurant"
+        ),
+    }
+
+
+@router.get("/{order_id}/nudge")
+def order_nudge(
+    order_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delay-prediction nudge for restaurant owners, the assigned rider, and
+    admins. Compares elapsed time against the ML/route ETA and flags at-risk
+    orders so they can be reprioritized."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found.")
+    is_restaurant_owner = (
+        user.role == "restaurant"
+        and any(r.id == order.restaurant_id for r in user.restaurants)
+    )
+    is_admin = user.role == "admin"
+    is_assigned_driver = (
+        user.role == "delivery"
+        and db.query(Delivery)
+        .filter(Delivery.order_id == order_id, Delivery.driver_id == user.id)
+        .first()
+        is not None
+    )
+    if not (is_restaurant_owner or is_admin or is_assigned_driver):
+        raise HTTPException(status_code=403, detail="You cannot view this order.")
+
+    delivery = db.query(Delivery).filter(Delivery.order_id == order_id).first()
+    route, _ = order_route(order)
+    progress, _rider = rider_progress(order, delivery)
+    eta_min, _source = eta_for_order(order, progress)
+
+    if order.status in ("DELIVERED", "CANCELLED"):
+        return {
+            "order_id": order.id,
+            "status": order.status,
+            "delay_min": 0,
+            "risk": "LOW",
+            "message": "Order finished.",
+            "eta_min": eta_min,
+            "progress": round(progress, 4),
+        }
+
+    elapsed_min = (
+        (datetime.utcnow() - order.created_at).total_seconds() / 60.0
+        if order.created_at
+        else 0.0
+    )
+    # Expected full-trip minutes = prep allowance + whole-route travel time.
+    travel_min = tracking.compute_eta(route, 0.0, tracking.AVG_SPEED_KMH)
+    expected_total = 15 + travel_min
+    delay = max(0.0, elapsed_min - expected_total)
+
+    if delay >= 10:
+        risk = "HIGH"
+        message = (
+            f"This order is running ~{delay:.0f} min late. Consider prioritizing "
+            "prep or reassigning the rider."
+        )
+    elif delay >= 3:
+        risk = "MEDIUM"
+        message = f"This order is running ~{delay:.0f} min behind. Keep it moving."
+    else:
+        risk = "LOW"
+        message = "On track — no action needed."
+
+    return {
+        "order_id": order.id,
+        "status": order.status,
+        "delay_min": round(delay, 1),
+        "risk": risk,
+        "message": message,
+        "eta_min": eta_min,
+        "progress": round(progress, 4),
+        "elapsed_min": round(elapsed_min, 1),
+    }
