@@ -385,6 +385,112 @@ pytest tests/
 | **ML #1: ETA** | 7 | XGBoost ETA beats baseline | ✅ |
 | **ML #2: Forecasting** | 8 | Heatmap + comparison table | ✅ |
 | Admin + deploy | 9 | ✅ Admin dashboard · ✅ Customer signup/register · ☐ Hugging Face Spaces · ☐ demo video | ✅ done (deploy pending) |
+| Phase 1 | 10–11 | FastAPI + PostgreSQL backend (JWT auth, orders, WebSocket live tracking, ML endpoints) | ✅ |
+| Phase 2 | 11–12 | Next.js frontend (auth, multi-restaurant cart, checkout, live tracking) | ✅ |
+| Phase 3 | 12 | Batch orders, cancellations, reviews, real-time driver notifications | ✅ |
+| Phase 4 | 13 | AI differentiator: SHAP explainability, demand forecast panel, personalized recommendations | ✅ |
+| Phase 5 | 13 | CI (GitHub Actions), Docker Compose, README | ✅ |
+
+---
+
+## 🏭 Phase 2–5 Re-platform: FastAPI + Next.js
+
+> The original Streamlit prototype is preserved above. The production build
+> (Phases 1–5) replaces it with a client/server platform while **keeping the
+> trained XGBoost ETA + demand-forecast models as the AI differentiator**.
+
+### Architecture (current)
+
+```
+┌──────────────┐  REST + WebSocket  ┌───────────────┐   SQLAlchemy   ┌──────────┐
+│  Next.js 14  │──────────────────▶│    FastAPI    │───────────────▶│ Postgres │
+│  (React/TS)  │◀──────────────────│  (uvicorn)    │                │  16      │
+└──────────────┘  JSON + WS state  └───────┬───────┘                └──────────┘
+                                           │
+                                     ┌─────▼──────┐   eta_model.joblib
+                                     │ ML services │   forecast_model.joblib
+                                     │ (XGBoost)   │   SHAP TreeExplainer
+                                     └────────────┘
+```
+
+- **Backend** — `backend/` (FastAPI + SQLAlchemy + Alembic). JWT auth
+  (access + refresh), orders, batch orders, cancellations, reviews, admin,
+  WebSocket live tracking (`/ws/tracking/{id}`) and per-user notifications
+  (`/ws/notifications`).
+- **Frontend** — `frontend/` (Next.js 14 App Router, Tailwind). Customer,
+  restaurant, delivery and admin dashboards with live tracking map (Leaflet).
+- **ML services** — `eta_service.py`, `forecast_service.py`,
+  `explain_service.py` + `models/`. Every ML endpoint returns
+  `"fallback": true` instead of erroring when a model file is missing, so the
+  app always works.
+
+### Quickstart (local dev)
+
+```bash
+# 1. Backend (requires a local PostgreSQL 16 with DB `foodai`)
+.venv/bin/uvicorn backend.main:app --reload --port 8000   # or `python -m uvicorn ...`
+
+# 2. Frontend
+cd frontend && npm install && npm run dev                 # http://localhost:3000
+```
+
+The backend runs Alembic migrations + seeds demo data on first boot. The
+delivery simulation advances riders every `SIM_INTERVAL_SECONDS` (default 2s).
+
+### Quickstart (Docker Compose)
+
+```bash
+docker compose up --build
+# → frontend http://localhost:3000 · backend http://localhost:8000 · Postgres :5432
+```
+
+Runs Alembic migrations automatically; demo data is seeded on first boot.
+
+### Demo accounts
+
+| Role | Email | Password |
+|---|---|---|
+| Customer | `customer@foodai.com` | `password123` |
+| Restaurant | `spice@foodai.com` (Spice Garden) · `dosa@foodai.com` (Dosa Plaza) | `password123` |
+| Delivery | `rider@foodai.com` · `priya@foodai.com` | `password123` |
+| Admin | `admin@foodai.com` | `password123` |
+
+### New API surface (Phases 1–5)
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /auth/register` · `POST /auth/login` · `POST /auth/refresh` | JWT auth |
+| `POST /orders` · `POST /orders/batch` | Single + multi-restaurant orders |
+| `POST /orders/{id}/cancel` | Cancellations (guarded by status/role) |
+| `POST /orders/{id}/assign` · `PATCH /orders/{id}/status` | Driver assignment + dispatch |
+| `POST /reviews` · `GET /reviews/restaurant/{id}` | Ratings & reviews |
+| `GET /ml/eta` · `POST /ml/eta/explain` | ETA prediction + SHAP explanation |
+| `GET /ml/forecast` · `GET /ml/forecast/series` | Zone forecast + next-N-hour series |
+| `GET /ml/order/{id}` | Per-order features + prediction + explanation |
+| `GET /ml/recommendations` | Personalized restaurant recommendations |
+| `GET /admin/overview` · `/admin/users` · `/admin/orders` | Admin dashboard |
+| `GET /tracking/{id}` · `WS /ws/tracking/{id}` · `WS /ws/notifications` | Live tracking + notifications |
+
+### Phase 4 — AI differentiator features
+
+1. **Explainable AI ETA** — the tracking page shows a *"Why this ETA?"* panel
+   with SHAP per-feature contributions (distance, prep time, time of day,
+   weekend, traffic, delivery zone) and their signed minute impact.
+2. **Demand forecast panel** — the admin dashboard shows predicted orders per
+   zone for the next 6 hours (XGBoost demand model, moving-average fallback).
+3. **Personalized recommendations** — customers get a *"Recommended for you"*
+   row scored from their order history (rating, cuisine affinity, familiarity,
+   review popularity) with a human-readable reason.
+
+### Phase 5 — CI / Docker / README
+
+- **CI** — `.github/workflows/ci.yml` runs backend `pytest` (Postgres service),
+  `next build`, and Playwright e2e (backend + frontend booted in-job) on every
+  push/PR to `main`.
+- **Docker** — `backend/Dockerfile`, `frontend/Dockerfile` and
+  `docker-compose.yml` wire Postgres 16 + FastAPI + Next.js.
+- **Testing** — `pytest tests/ -q` (backend, 42 tests), `cd frontend && npm run
+  build`, `npx playwright test` (4 e2e flows).
 
 ---
 

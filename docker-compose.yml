@@ -1,0 +1,55 @@
+# FoodAI — local docker-compose stack
+#
+#   docker compose up --build
+#
+# Services:
+#   db       PostgreSQL 16 (foodai/foodai_pass)
+#   backend  FastAPI on :8000 (runs Alembic migrations, seeds demo data)
+#   frontend Next.js on :3000 (browser talks to :8000 directly)
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: foodai
+      POSTGRES_PASSWORD: foodai_pass
+      POSTGRES_DB: foodai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foodai -d foodai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg2://foodai:foodai_pass@db:5432/foodai
+      CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
+      JWT_SECRET: "foodai-dev-secret-change-me"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

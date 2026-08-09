@@ -1,0 +1,16 @@
+# Keep image builds lean: never ship VCS, virtualenvs, caches or node build
+# artifacts into the FoodAI containers.
+.git
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+frontend/node_modules
+frontend/.next
+frontend/test-results
+frontend/playwright-report
+frontend/e2e
+tests
+data
+streamlit_app.py
+*.log
