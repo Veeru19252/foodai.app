@@ -144,8 +144,8 @@ export default function TrackingPage() {
   if (error) {
     return (
       <ProtectedRoute>
-        <div className="rounded-2xl border border-gray-200 bg-white p-10 text-center">
-          <p className="mb-4 text-red-600">{error}</p>
+        <div className="rounded-2xl border border-line bg-card p-10 text-center">
+          <p className="mb-4 text-red-400">{error}</p>
           <Link
             href="/orders"
             className="rounded-lg bg-brand-600 px-4 py-2 font-semibold text-white"
@@ -160,7 +160,7 @@ export default function TrackingPage() {
   if (!state) {
     return (
       <ProtectedRoute>
-        <div className="flex h-64 items-center justify-center text-gray-500">
+        <div className="flex h-64 items-center justify-center text-muted">
           Loading tracking…
         </div>
       </ProtectedRoute>
@@ -182,7 +182,7 @@ export default function TrackingPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Live tracking</h1>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted">
             Order #{state.order_id} · {state.restaurant_name}
             {state.restaurant_city ? ` · ${state.restaurant_city}` : ""}
           </p>
@@ -192,15 +192,15 @@ export default function TrackingPage() {
             <span
               className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
                 state.position_source === "live"
-                  ? "bg-green-50 text-green-700"
-                  : "bg-gray-100 text-gray-500"
+                  ? "bg-emerald-500/15 text-emerald-300"
+                  : "bg-surface text-muted"
               }`}
             >
               <span
                 className={`h-2 w-2 rounded-full ${
                   state.position_source === "live"
                     ? "animate-pulse bg-green-500"
-                    : "bg-gray-400"
+                    : "bg-faint"
                 }`}
               />
               {state.position_source === "live" ? "LIVE GPS" : "SIMULATED"}
@@ -212,22 +212,22 @@ export default function TrackingPage() {
 
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="card-premium flex items-center gap-3 p-4">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-lg">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/15 text-lg">
             🕒
           </span>
           <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+            <p className="text-xs font-medium uppercase tracking-wide text-faint">
               AI ETA
             </p>
             <p className="text-xl font-bold tracking-tight">{etaLabel}</p>
           </div>
         </div>
         <div className="card-premium flex items-center gap-3 p-4">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-lg">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-500/15 text-lg">
             📏
           </span>
           <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+            <p className="text-xs font-medium uppercase tracking-wide text-faint">
               Distance
             </p>
             <p className="text-xl font-bold tracking-tight">
@@ -236,18 +236,18 @@ export default function TrackingPage() {
           </div>
         </div>
         <div className="card-premium flex items-center gap-3 p-4">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gray-100 text-lg">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface text-lg">
             📍
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+            <p className="text-xs font-medium uppercase tracking-wide text-faint">
               Delivery to
             </p>
             <p className="truncate text-sm font-semibold">
               {state.delivery_address ?? "—"}
             </p>
             {state.delivery_city && (
-              <p className="truncate text-xs text-gray-500">
+              <p className="truncate text-xs text-muted">
                 {state.delivery_city}
               </p>
             )}
@@ -256,16 +256,16 @@ export default function TrackingPage() {
       </div>
 
       {prediction && prediction.eta_min != null && (
-        <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-4">
+        <div className="mb-4 rounded-2xl border border-line bg-card p-4">
           <button
             type="button"
             onClick={() => setShowExplain((v) => !v)}
             className="flex w-full items-center justify-between text-left"
           >
-            <span className="text-sm font-semibold text-brand-700">
-              Why this ETA? <span className="text-xs font-normal text-gray-500">(AI explainability)</span>
+            <span className="text-sm font-semibold text-brand-300">
+              Why this ETA? <span className="text-xs font-normal text-muted">(AI explainability)</span>
             </span>
-            <span className="text-gray-400">{showExplain ? "▲" : "▼"}</span>
+            <span className="text-faint">{showExplain ? "▲" : "▼"}</span>
           </button>
 
           {showExplain && (
@@ -273,7 +273,7 @@ export default function TrackingPage() {
               {prediction.explanation ? (
                 <ExplainPanel prediction={prediction} />
               ) : (
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-muted">
                   The explainer model isn&apos;t available right now — the ETA
                   is still the ML model&apos;s best estimate.
                 </p>
@@ -283,7 +283,7 @@ export default function TrackingPage() {
         </div>
       )}
 
-      <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-gray-200/80">
+      <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-line">
         <div
           className="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-600 shadow-[0_0_8px_rgba(234,88,12,0.5)]"
           style={{
@@ -292,7 +292,7 @@ export default function TrackingPage() {
           }}
         />
       </div>
-      <p className="mb-4 text-sm text-gray-500">
+      <p className="mb-4 text-sm text-muted">
         {state.status === "DELIVERED"
           ? "Delivered! Enjoy your meal 🎉"
           : state.status === "OUT_FOR_DELIVERY"
@@ -302,7 +302,7 @@ export default function TrackingPage() {
 
       <TrackingMap route={state.route} riderLat={state.rider_lat} riderLng={state.rider_lng} />
 
-      <div className="mt-4 flex items-center justify-between text-xs text-gray-400">
+      <div className="mt-4 flex items-center justify-between text-xs text-faint">
         <span className="inline-flex items-center gap-1.5">
           <span
             className={`h-1.5 w-1.5 rounded-full ${
@@ -311,7 +311,7 @@ export default function TrackingPage() {
           />
           {connected ? "live updates connected" : "polling fallback"}
         </span>
-        <Link href="/orders" className="font-medium text-brand-600 hover:underline">
+        <Link href="/orders" className="font-medium text-brand-400 hover:underline">
           My orders →
         </Link>
       </div>
@@ -331,7 +331,7 @@ function ExplainPanel({ prediction }: { prediction: OrderPrediction }) {
 
   return (
     <div>
-      <p className="mb-3 text-sm text-gray-600">
+      <p className="mb-3 text-sm text-secondary">
         The model scores <strong>11 factors</strong> (distance, prep time, time
         of day, weekend, traffic and your delivery zone) against historical
         deliveries. These are the biggest influences on the{" "}
@@ -344,8 +344,8 @@ function ExplainPanel({ prediction }: { prediction: OrderPrediction }) {
           const slower = c.shap > 0;
           return (
             <div key={c.feature} className="flex items-center gap-3">
-              <div className="w-32 shrink-0 text-xs text-gray-500">{label}</div>
-              <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-gray-200">
+              <div className="w-32 shrink-0 text-xs text-muted">{label}</div>
+              <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-line">
                 <div
                   className={
                     slower ? "h-full rounded-full bg-amber-500" : "h-full rounded-full bg-emerald-500"
@@ -355,7 +355,7 @@ function ExplainPanel({ prediction }: { prediction: OrderPrediction }) {
               </div>
               <div
                 className={`w-20 shrink-0 text-right text-xs font-semibold ${
-                  slower ? "text-amber-600" : "text-emerald-600"
+                  slower ? "text-amber-400" : "text-emerald-400"
                 }`}
               >
                 {slower ? "+" : "−"}

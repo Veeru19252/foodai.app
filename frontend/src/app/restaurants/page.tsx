@@ -47,7 +47,7 @@ export default function RestaurantsPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Restaurants near you</h1>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted">
             Track every order live with AI-predicted ETAs
           </p>
         </div>
@@ -57,7 +57,7 @@ export default function RestaurantsPage() {
             className={`rounded-full px-3 py-1.5 text-sm font-medium ${
               cuisine === "All"
                 ? "bg-brand-600 text-white"
-                : "bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+                : "bg-card text-secondary ring-1 ring-line hover:bg-surface"
             }`}
           >
             All
@@ -69,7 +69,7 @@ export default function RestaurantsPage() {
               className={`rounded-full px-3 py-1.5 text-sm font-medium ${
                 cuisine === c
                   ? "bg-brand-600 text-white"
-                  : "bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+                  : "bg-card text-secondary ring-1 ring-line hover:bg-surface"
               }`}
             >
               {c}
@@ -79,7 +79,7 @@ export default function RestaurantsPage() {
       </div>
 
       {error && (
-        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="mb-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
           {error}
         </p>
       )}
@@ -87,12 +87,12 @@ export default function RestaurantsPage() {
       {recommendations.length > 0 && (
         <div className="mb-8">
           <div className="mb-1 flex items-center justify-between">
-            <h2 className="font-semibold text-gray-800">Recommended for you</h2>
-            <span className="text-xs text-gray-400">
+            <h2 className="font-semibold text-foreground">Recommended for you</h2>
+            <span className="text-xs text-faint">
               AI · based on your order history
             </span>
           </div>
-          <p className="mb-3 text-xs text-gray-500">
+          <p className="mb-3 text-xs text-muted">
             Personalized picks from your past orders and cuisine preferences.
           </p>
           <div className="stagger grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -110,18 +110,18 @@ export default function RestaurantsPage() {
                     reviews_rating: rec.reviews_rating,
                   })
                 }
-                className="press group rounded-2xl border border-brand-200 bg-gradient-to-br from-brand-50/80 to-white p-4 text-left shadow-sm transition-shadow duration-200 hover:shadow-md"
+                className="press group rounded-2xl border border-brand-500/20 bg-gradient-to-br from-brand-500/10 to-surface p-4 text-left shadow-sm transition-shadow duration-200 hover:shadow-md hover:border-brand-500/40"
               >
                 <div className="mb-1 flex items-center justify-between">
-                  <h3 className="font-semibold group-hover:text-brand-600">
+                  <h3 className="font-semibold group-hover:text-brand-300">
                     {rec.name}
                   </h3>
-                  <span className="rounded-lg bg-green-50 px-2 py-0.5 text-sm font-semibold text-green-700">
+                  <span className="rounded-lg bg-emerald-500/15 px-2 py-0.5 text-sm font-semibold text-emerald-300">
                     ★ {rec.rating.toFixed(1)}
                   </span>
                 </div>
-                <p className="text-xs text-gray-500">{rec.cuisine}</p>
-                <p className="mt-2 rounded-lg bg-white px-2 py-1 text-xs font-medium text-brand-700 ring-1 ring-brand-100">
+                <p className="text-xs text-muted">{rec.cuisine}</p>
+                <p className="mt-2 rounded-lg bg-surface px-2 py-1 text-xs font-medium text-brand-300 ring-1 ring-brand-500/20">
                   {rec.reason}
                 </p>
               </button>
@@ -138,22 +138,22 @@ export default function RestaurantsPage() {
             className="press card-premium group p-5 text-left"
           >
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-lg font-semibold group-hover:text-brand-600">
+              <h3 className="text-lg font-semibold group-hover:text-brand-300">
                 {r.name}
               </h3>
-              <span className="rounded-lg bg-green-50 px-2 py-0.5 text-sm font-semibold text-green-700">
+              <span className="rounded-lg bg-emerald-500/15 px-2 py-0.5 text-sm font-semibold text-emerald-300">
                 ★ {r.rating.toFixed(1)}
               </span>
             </div>
-            <p className="text-sm text-gray-500">{r.cuisine}</p>
+            <p className="text-sm text-muted">{r.cuisine}</p>
             {r.city && (
-              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand-700 ring-1 ring-brand-100">
+              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-500/15 px-2 py-0.5 text-[11px] font-semibold text-brand-300 ring-1 ring-brand-500/20">
                 {r.city}
               </span>
             )}
-            <p className="mt-1 text-xs text-gray-400">{r.address}</p>
+            <p className="mt-1 text-xs text-faint">{r.address}</p>
             {r.review_count > 0 && (
-              <p className="mt-2 text-xs text-gray-500">
+              <p className="mt-2 text-xs text-muted">
                 ⭐ {r.reviews_rating.toFixed(1)} · {r.review_count} review
                 {r.review_count === 1 ? "" : "s"}
               </p>
@@ -163,7 +163,7 @@ export default function RestaurantsPage() {
       </div>
 
       {restaurants.length === 0 && !error && (
-        <p className="py-16 text-center text-gray-400">
+        <p className="py-16 text-center text-faint">
           No restaurants in this category yet.
         </p>
       )}
@@ -176,7 +176,7 @@ export default function RestaurantsPage() {
       )}
 
       {cartSummary.length > 0 && (
-        <div className="fixed bottom-4 left-1/2 z-[70] w-[min(92vw,480px)] -translate-x-1/2 rounded-2xl bg-gray-900/90 px-5 py-3 text-white shadow-2xl backdrop-blur-xl">
+        <div className="fixed bottom-4 left-1/2 z-[70] w-[min(92vw,480px)] -translate-x-1/2 rounded-2xl border border-line bg-card/95 px-5 py-3 text-foreground shadow-2xl backdrop-blur-xl">
           <div className="flex items-center justify-between text-sm">
             <span>
               {count} item{count === 1 ? "" : "s"} in cart

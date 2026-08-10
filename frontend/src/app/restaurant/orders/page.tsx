@@ -102,14 +102,14 @@ export default function RestaurantOrdersPage() {
       <h1 className="mb-6 text-2xl font-bold">Restaurant dashboard</h1>
 
       {error && (
-        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="mb-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
           {error}
         </p>
       )}
 
       <div className="space-y-3">
         {orders.length === 0 && (
-          <p className="py-16 text-center text-gray-400">No orders yet.</p>
+          <p className="py-16 text-center text-faint">No orders yet.</p>
         )}
         {orders.map((o) => {
           const next = NEXT_STATUS[o.status];
@@ -120,14 +120,14 @@ export default function RestaurantOrdersPage() {
             <div
               key={o.id}
               data-testid={`restaurant-order-${o.id}`}
-              className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm"
+              className="rounded-2xl border border-line bg-card px-5 py-4 shadow-sm"
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="font-semibold">
                     #{o.id} — {o.customer_name}
                   </p>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-muted">
                     {new Date(o.created_at).toLocaleString()}
                   </p>
                 </div>
@@ -141,8 +141,8 @@ export default function RestaurantOrdersPage() {
                 <div
                   className={`mt-2 rounded-lg px-3 py-2 text-sm font-medium ${
                     nudge.risk === "HIGH"
-                      ? "bg-red-50 text-red-700"
-                      : "bg-amber-50 text-amber-700"
+                      ? "bg-red-500/10 text-red-300"
+                      : "bg-amber-500/10 text-amber-300"
                   }`}
                 >
                   ⚠ {nudge.message}
@@ -150,17 +150,17 @@ export default function RestaurantOrdersPage() {
               )}
 
               {o.assigned_driver_name && (
-                <p className="mt-2 text-xs text-gray-500">
+                <p className="mt-2 text-xs text-muted">
                   Assigned to{" "}
                   <span className="font-semibold">{o.assigned_driver_name}</span>
                   {autoReason[o.id] && (
-                    <span className="text-gray-400"> — auto: {autoReason[o.id]}</span>
+                    <span className="text-faint"> — auto: {autoReason[o.id]}</span>
                   )}
                 </p>
               )}
 
               {needsDriver && (
-                <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-gray-100 pt-3">
+                <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line pt-3">
                   <select
                     value={assigned}
                     onChange={(e) =>
@@ -170,7 +170,7 @@ export default function RestaurantOrdersPage() {
                       }))
                     }
                     aria-label="Select delivery driver"
-                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none"
+                    className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-foreground focus:border-brand-500 focus:outline-none"
                   >
                     <option value={0} disabled>
                       Select driver…
@@ -184,7 +184,7 @@ export default function RestaurantOrdersPage() {
                   <button
                     onClick={() => assignDriver(o.id)}
                     disabled={busyId === o.id || !assigned || !!o.assigned_driver_id}
-                    className="rounded-lg border border-gray-900 px-3 py-1.5 text-sm font-semibold text-gray-900 hover:bg-gray-100 disabled:opacity-50"
+                    className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-surface disabled:opacity-50"
                   >
                     {busyId === o.id ? "Assigning…" : "Assign driver"}
                   </button>
@@ -198,7 +198,7 @@ export default function RestaurantOrdersPage() {
                   <button
                     onClick={() => advance(o.id, "OUT_FOR_DELIVERY")}
                     disabled={busyId === o.id || !o.assigned_driver_id}
-                    className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
+                    className="rounded-lg bg-foreground px-3 py-1.5 text-sm font-semibold text-background hover:bg-secondary disabled:opacity-50"
                   >
                     Dispatch
                   </button>
@@ -206,11 +206,11 @@ export default function RestaurantOrdersPage() {
               )}
 
               {next && !needsDriver && (
-                <div className="mt-3 border-t border-gray-100 pt-3">
+                <div className="mt-3 border-t border-line pt-3">
                   <button
                     onClick={() => advance(o.id, next)}
                     disabled={busyId === o.id}
-                    className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-60"
+                    className="rounded-lg bg-foreground px-3 py-1.5 text-sm font-semibold text-background hover:bg-secondary disabled:opacity-60"
                   >
                     {`Mark ${next.replaceAll("_", " ").toLowerCase()}`}
                   </button>
@@ -218,7 +218,7 @@ export default function RestaurantOrdersPage() {
               )}
 
               {o.status === "OUT_FOR_DELIVERY" && (
-                <p className="mt-2 text-xs text-gray-400">
+                <p className="mt-2 text-xs text-faint">
                   Dispatched — rider is on the way
                 </p>
               )}

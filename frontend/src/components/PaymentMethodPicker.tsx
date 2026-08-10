@@ -54,27 +54,27 @@ export function PaymentMethodPicker({ value, onChange, total }: PaymentMethodPic
             <Card
               className={cn(
                 "cursor-pointer p-4",
-                active ? "border-brand-600 bg-brand-50/40 ring-2 ring-brand-600 ring-offset-1" : "hover:border-gray-300"
+                active ? "border-brand-500 bg-brand-500/10 ring-2 ring-brand-500 ring-offset-1 ring-offset-background" : "hover:border-line"
               )}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="font-medium text-gray-900">{option.title}</p>
-                  <p className="text-sm text-gray-500">{option.description}</p>
+                  <p className="font-medium text-foreground">{option.title}</p>
+                  <p className="text-sm text-muted">{option.description}</p>
                 </div>
                 <span
                   className={cn(
                     "rounded-full px-2 py-0.5 text-xs font-medium",
                     option.id === "COD"
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "bg-amber-100 text-amber-700"
+                      ? "bg-emerald-500/15 text-emerald-300"
+                      : "bg-amber-500/15 text-amber-300"
                   )}
                 >
                   {option.badge}
                 </span>
               </div>
               {option.id === "RAZORPAY" && (
-                <p className="mt-2 text-xs text-gray-400">
+                <p className="mt-2 text-xs text-faint">
                   Paying ₹{total.toFixed(2)} via simulated Razorpay signature
                 </p>
               )}

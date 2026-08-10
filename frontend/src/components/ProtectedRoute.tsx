@@ -34,7 +34,7 @@ export default function ProtectedRoute({
 
   if (loading || !user || (role && user.role !== role)) {
     return (
-      <div className="flex h-64 items-center justify-center text-gray-500">
+      <div className="flex h-64 items-center justify-center text-muted">
         Loading…
       </div>
     );

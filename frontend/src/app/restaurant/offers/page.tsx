@@ -72,18 +72,18 @@ export default function RestaurantOffersPage() {
       <h1 className="mb-6 text-2xl font-bold">Restaurant offers</h1>
 
       {error && (
-        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="mb-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
           {error}
         </p>
       )}
       {note && (
-        <p className="mb-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+        <p className="mb-4 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
           {note}
         </p>
       )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-gray-200 bg-white p-5">
+        <section className="rounded-2xl border border-line bg-card p-5">
           <h2 className="mb-3 font-semibold">Create offer</h2>
           <form onSubmit={createOffer} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
@@ -93,7 +93,7 @@ export default function RestaurantOffersPage() {
                   type="text"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 uppercase focus:border-brand-500 focus:outline-none"
+                  className="w-full rounded-lg border border-line bg-surface px-3 py-2 uppercase text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                   placeholder="SPICE20"
                 />
               </div>
@@ -102,7 +102,7 @@ export default function RestaurantOffersPage() {
                 <select
                   value={discountType}
                   onChange={(e) => setDiscountType(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                  className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                 >
                   <option value="percent">Percent (%)</option>
                   <option value="flat">Flat (₹)</option>
@@ -115,7 +115,7 @@ export default function RestaurantOffersPage() {
                 type="text"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                 placeholder="20% off up to ₹60"
               />
             </div>
@@ -129,7 +129,7 @@ export default function RestaurantOffersPage() {
                   min="0"
                   value={discountValue}
                   onChange={(e) => setDiscountValue(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                  className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                 />
               </div>
               <div>
@@ -139,7 +139,7 @@ export default function RestaurantOffersPage() {
                   min="0"
                   value={minOrder}
                   onChange={(e) => setMinOrder(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                  className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                 />
               </div>
               <div>
@@ -149,7 +149,7 @@ export default function RestaurantOffersPage() {
                   min="0"
                   value={maxDiscount}
                   onChange={(e) => setMaxDiscount(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                  className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                   placeholder="Optional"
                 />
               </div>
@@ -164,11 +164,11 @@ export default function RestaurantOffersPage() {
           </form>
         </section>
 
-        <section className="rounded-2xl border border-gray-200 bg-white p-5">
+        <section className="rounded-2xl border border-line bg-card p-5">
           <h2 className="mb-3 font-semibold">Active &amp; platform offers</h2>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-line">
             {offers.length === 0 && (
-              <p className="py-4 text-sm text-gray-400">No offers yet.</p>
+              <p className="py-4 text-sm text-faint">No offers yet.</p>
             )}
             {offers.map((offer) => (
               <div
@@ -181,14 +181,14 @@ export default function RestaurantOffersPage() {
                     <span
                       className={`ml-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
                         offer.scope === "restaurant"
-                          ? "bg-brand-100 text-brand-700"
-                          : "bg-gray-100 text-gray-600"
+                          ? "bg-brand-500/15 text-brand-300"
+                          : "bg-surface text-muted"
                       }`}
                     >
                       {offer.scope}
                     </span>
                   </p>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-faint">
                     {offer.description ||
                       `${offer.discount_type} ${offer.discount_value}`}
                     {offer.times_used > 0 && ` · used ${offer.times_used}x`}
@@ -198,8 +198,8 @@ export default function RestaurantOffersPage() {
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
                       offer.active
-                        ? "bg-green-100 text-green-700"
-                        : "bg-gray-100 text-gray-500"
+                        ? "bg-emerald-500/15 text-emerald-300"
+                        : "bg-surface text-muted"
                     }`}
                   >
                     {offer.active ? "ACTIVE" : "PAUSED"}
@@ -208,7 +208,7 @@ export default function RestaurantOffersPage() {
                     <button
                       onClick={() => toggle(offer)}
                       disabled={busy}
-                      className="text-xs font-medium text-brand-600 hover:underline"
+                      className="text-xs font-medium text-brand-400 hover:underline"
                     >
                       {offer.active ? "Pause" : "Activate"}
                     </button>

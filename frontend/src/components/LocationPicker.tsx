@@ -56,9 +56,14 @@ export default function LocationPicker({
         center,
         zoom: 12,
       });
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "&copy; OpenStreetMap contributors",
-      }).addTo(leafletMap);
+      L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        {
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          maxZoom: 19,
+        }
+      ).addTo(leafletMap);
 
       const setMarker = (lat: number, lng: number) => {
         if (marker) marker.remove();
@@ -109,7 +114,7 @@ export default function LocationPicker({
             className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
               city === c
                 ? "bg-brand-600 text-white"
-                : "bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50"
+                : "bg-card text-muted ring-1 ring-line hover:bg-surface"
             }`}
           >
             {c}
@@ -125,15 +130,15 @@ export default function LocationPicker({
             className={`rounded-full px-3 py-1 text-xs font-medium ${
               point.address === p.address
                 ? "bg-brand-600 text-white"
-                : "bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+                : "bg-card text-secondary ring-1 ring-line hover:bg-surface"
             }`}
           >
             {p.label}
           </button>
         ))}
       </div>
-      <div ref={mapRef} className="h-64 w-full rounded-xl border border-gray-200" />
-      <p className="mt-2 text-xs text-gray-500">
+      <div ref={mapRef} className="h-64 w-full rounded-xl border border-line" />
+      <p className="mt-2 text-xs text-muted">
         Selected: {point.address} ({point.lat.toFixed(5)}, {point.lng.toFixed(5)})
       </p>
     </div>

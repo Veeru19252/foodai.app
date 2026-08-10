@@ -25,7 +25,7 @@ export default function Home() {
   }, [user, loading, router]);
 
   return (
-    <div className="flex h-64 items-center justify-center text-gray-500">
+    <div className="flex h-64 items-center justify-center text-muted">
       Redirecting…
     </div>
   );

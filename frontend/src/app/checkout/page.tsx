@@ -189,8 +189,8 @@ export default function CheckoutPage() {
       <h1 className="mb-6 text-2xl font-bold">Checkout</h1>
 
       {items.length === 0 ? (
-        <div className="rounded-2xl border border-gray-200 bg-white p-10 text-center">
-          <p className="mb-4 text-gray-500">Your cart is empty.</p>
+        <div className="rounded-2xl border border-line bg-card p-10 text-center">
+          <p className="mb-4 text-muted">Your cart is empty.</p>
           <Link
             href="/restaurants"
             className="rounded-lg bg-brand-600 px-4 py-2 font-semibold text-white hover:bg-brand-700"
@@ -201,14 +201,14 @@ export default function CheckoutPage() {
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
           <form onSubmit={placeOrder} className="space-y-6 lg:col-span-3">
-            <section className="rounded-2xl border border-gray-200 bg-white p-5">
+            <section className="rounded-2xl border border-line bg-card p-5">
               <h2 className="mb-3 font-semibold">Delivery details</h2>
               <label className="mb-1 block text-sm font-medium">Address</label>
               <input
                 type="text"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                className="mb-4 w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                className="mb-4 w-full rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                 placeholder="Flat / street / landmark"
               />
               <LocationPicker
@@ -240,7 +240,7 @@ export default function CheckoutPage() {
                 }}
                 cityCenters={CITY_CENTERS}
               />
-              <div className="mt-3 border-t border-gray-100 pt-3">
+              <div className="mt-3 border-t border-line pt-3">
                 <p className="mb-2 text-sm font-medium">Saved addresses</p>
                 {saved.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-2">
@@ -249,7 +249,7 @@ export default function CheckoutPage() {
                         key={s.id}
                         type="button"
                         onClick={() => applyAddress(s)}
-                        className="rounded-full border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 hover:border-brand-500 hover:text-brand-700"
+                        className="rounded-full border border-line px-3 py-1 text-xs font-medium text-secondary hover:border-brand-500 hover:text-brand-400"
                       >
                         {s.label}
                       </button>
@@ -261,24 +261,24 @@ export default function CheckoutPage() {
                     type="text"
                     value={saveLabel}
                     onChange={(e) => setSaveLabel(e.target.value)}
-                    className="w-28 rounded-lg border border-gray-300 px-2 py-1.5 text-xs focus:border-brand-500 focus:outline-none"
+                    className="w-28 rounded-lg border border-line bg-surface px-2 py-1.5 text-xs text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                     placeholder="Label"
                   />
                   <button
                     type="button"
                     onClick={saveCurrentAddress}
-                    className="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-200"
+                    className="rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-secondary hover:bg-elevated"
                   >
                     Save current address
                   </button>
                   {saveNote && (
-                    <span className="text-xs text-green-600">{saveNote}</span>
+                    <span className="text-xs text-emerald-400">{saveNote}</span>
                   )}
                 </div>
               </div>
             </section>
 
-            <section className="rounded-2xl border border-gray-200 bg-white p-5">
+            <section className="rounded-2xl border border-line bg-card p-5">
               <h2 className="mb-3 font-semibold">Payment method</h2>
               <PaymentMethodPicker
                 value={paymentMethod}
@@ -287,7 +287,7 @@ export default function CheckoutPage() {
               />
             </section>
 
-            <section className="rounded-2xl border border-gray-200 bg-white p-5">
+            <section className="rounded-2xl border border-line bg-card p-5">
               <h2 className="mb-3 font-semibold">Contact & locality</h2>
               <div className="grid grid-cols-2 gap-3">
                 <input
@@ -295,7 +295,7 @@ export default function CheckoutPage() {
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   maxLength={15}
-                  className="col-span-2 rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                  className="col-span-2 rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                   placeholder="Phone (10 digits)"
                 />
                 <input
@@ -303,7 +303,7 @@ export default function CheckoutPage() {
                   value={city}
                   onChange={(e) => setCity(e.target.value)}
                   maxLength={64}
-                  className="rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                  className="rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                   placeholder="City"
                 />
                 <input
@@ -311,7 +311,7 @@ export default function CheckoutPage() {
                   value={stateName}
                   onChange={(e) => setStateName(e.target.value)}
                   maxLength={64}
-                  className="rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                  className="rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                   placeholder="State"
                 />
                 <input
@@ -319,26 +319,26 @@ export default function CheckoutPage() {
                   value={pincode}
                   onChange={(e) => setPincode(e.target.value)}
                   maxLength={10}
-                  className="rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                  className="rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                   placeholder="Pincode"
                 />
               </div>
             </section>
 
-            <section className="rounded-2xl border border-gray-200 bg-white p-5">
+            <section className="rounded-2xl border border-line bg-card p-5">
               <h2 className="mb-3 font-semibold">Promo code</h2>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={promo}
                   onChange={(e) => setPromo(e.target.value)}
-                  className="flex-1 rounded-lg border border-gray-300 px-3 py-2 uppercase focus:border-brand-500 focus:outline-none"
+                  className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 uppercase text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                   placeholder="WELCOME10"
                 />
                 <button
                   type="button"
                   onClick={validatePromo}
-                  className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800"
+                  className="rounded-lg bg-foreground px-4 py-2 text-sm font-semibold text-background hover:bg-secondary"
                 >
                   Apply
                 </button>
@@ -346,7 +346,7 @@ export default function CheckoutPage() {
               {promoMessage && (
                 <p
                   className={`mt-2 text-sm ${
-                    promoDiscount > 0 ? "text-green-600" : "text-red-600"
+                    promoDiscount > 0 ? "text-emerald-400" : "text-red-400"
                   }`}
                 >
                   {promoMessage}
@@ -354,7 +354,7 @@ export default function CheckoutPage() {
               )}
             </section>
 
-            <section className="rounded-2xl border border-gray-200 bg-white p-5">
+            <section className="rounded-2xl border border-line bg-card p-5">
               <h2 className="mb-3 font-semibold">Schedule delivery</h2>
               <div className="mb-3 flex gap-2">
                 <button
@@ -362,8 +362,8 @@ export default function CheckoutPage() {
                   onClick={() => setScheduleMode("now")}
                   className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold ${
                     scheduleMode === "now"
-                      ? "border-brand-600 bg-brand-50 text-brand-700"
-                      : "border-gray-300 text-gray-600 hover:border-brand-500"
+                      ? "border-brand-500 bg-brand-500/10 text-brand-300"
+                      : "border-line text-muted hover:border-brand-500"
                   }`}
                 >
                   Deliver now
@@ -373,8 +373,8 @@ export default function CheckoutPage() {
                   onClick={() => setScheduleMode("later")}
                   className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold ${
                     scheduleMode === "later"
-                      ? "border-brand-600 bg-brand-50 text-brand-700"
-                      : "border-gray-300 text-gray-600 hover:border-brand-500"
+                      ? "border-brand-500 bg-brand-500/10 text-brand-300"
+                      : "border-line text-muted hover:border-brand-500"
                   }`}
                 >
                   Schedule later
@@ -385,30 +385,30 @@ export default function CheckoutPage() {
                   type="datetime-local"
                   value={scheduledFor}
                   onChange={(e) => setScheduledFor(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                  className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-foreground focus:border-brand-500 focus:outline-none"
                 />
               )}
             </section>
 
             {error && (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
                 {error}
               </p>
             )}
           </form>
 
-          <aside className="h-fit rounded-2xl border border-gray-200 bg-white p-5 lg:col-span-2">
+          <aside className="h-fit rounded-2xl border border-line bg-card p-5 lg:col-span-2">
             <h2 className="mb-3 font-semibold">Order summary</h2>
             <div className="space-y-3">
               {groups.map((g) => (
                 <div
                   key={g.restaurant_id}
-                  className="rounded-xl bg-gray-50 p-3"
+                  className="rounded-xl bg-surface p-3"
                 >
-                  <p className="mb-1 text-sm font-semibold text-gray-700">
+                  <p className="mb-1 text-sm font-semibold text-foreground">
                     {g.restaurant_name}
                   </p>
-                  <div className="divide-y divide-gray-100">
+                  <div className="divide-y divide-line">
                     {g.items.map((i) => (
                       <div
                         key={i.menu_item_id}
@@ -423,34 +423,34 @@ export default function CheckoutPage() {
                       </div>
                     ))}
                   </div>
-                  <p className="mt-1 text-right text-xs text-gray-500">
+                  <p className="mt-1 text-right text-xs text-muted">
                     Group subtotal ₹{g.subtotal.toFixed(0)}
                   </p>
                 </div>
               ))}
             </div>
-            <div className="mt-4 space-y-1 border-t border-gray-100 pt-3 text-sm">
+            <div className="mt-4 space-y-1 border-t border-line pt-3 text-sm">
               <div className="flex justify-between">
-                <span className="text-gray-500">Subtotal</span>
+                <span className="text-muted">Subtotal</span>
                 <span>₹{subtotal.toFixed(0)}</span>
               </div>
               {promoDiscount > 0 && (
-                <div className="flex justify-between text-green-600">
+                <div className="flex justify-between text-emerald-400">
                   <span>Promo discount</span>
                   <span>−₹{promoDiscount.toFixed(0)}</span>
                 </div>
               )}
               {groups.length > 1 && promo.trim() && (
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-muted">
                   Promo applies to {groups[0].restaurant_name}
                 </p>
               )}
               {surge ? (
                 <div className="flex justify-between">
-                  <span className="text-gray-500">
+                  <span className="text-muted">
                     Delivery fee
                     {surge.surge_multiplier > 1.0 && (
-                      <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
+                      <span className="ml-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-300">
                         {surge.surge_multiplier.toFixed(1)}× SURGE
                       </span>
                     )}
@@ -459,12 +459,12 @@ export default function CheckoutPage() {
                 </div>
               ) : (
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Delivery fee</span>
-                  <span className="text-gray-400">calculating…</span>
+                  <span className="text-muted">Delivery fee</span>
+                  <span className="text-faint">calculating…</span>
                 </div>
               )}
               {scheduleMode === "later" && (
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-muted">
                   Scheduled order — kitchen prepares it at the chosen time.
                 </p>
               )}
@@ -483,7 +483,7 @@ export default function CheckoutPage() {
                 ? "Placing orders…"
                 : `Place ${groups.length > 1 ? `${groups.length} orders` : "order"} · ₹${grandTotal.toFixed(0)}`}
             </button>
-            <p className="mt-2 text-center text-xs text-gray-400">
+            <p className="mt-2 text-center text-xs text-faint">
               {groups.length > 1
                 ? "Each restaurant receives its own order and rider"
                 : "AI ETA + live rider tracking after ordering"}

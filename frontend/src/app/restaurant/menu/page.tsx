@@ -86,18 +86,18 @@ export default function RestaurantMenuPage() {
       <h1 className="mb-6 text-2xl font-bold">Menu management</h1>
 
       {error && (
-        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="mb-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
           {error}
         </p>
       )}
       {note && (
-        <p className="mb-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+        <p className="mb-4 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
           {note}
         </p>
       )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-gray-200 bg-white p-5">
+        <section className="rounded-2xl border border-line bg-card p-5">
           <h2 className="mb-3 font-semibold">Add menu item</h2>
           <form onSubmit={addItem} className="space-y-3">
             <div>
@@ -106,7 +106,7 @@ export default function RestaurantMenuPage() {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                 placeholder="e.g. Butter Chicken"
               />
             </div>
@@ -119,7 +119,7 @@ export default function RestaurantMenuPage() {
                   step="0.5"
                   value={price}
                   onChange={(e) => setPrice(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                  className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                   placeholder="199"
                 />
               </div>
@@ -130,7 +130,7 @@ export default function RestaurantMenuPage() {
                   min="0"
                   value={prep}
                   onChange={(e) => setPrep(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none"
+                  className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                 />
               </div>
             </div>
@@ -144,13 +144,13 @@ export default function RestaurantMenuPage() {
           </form>
         </section>
 
-        <section className="rounded-2xl border border-gray-200 bg-white p-5">
+        <section className="rounded-2xl border border-line bg-card p-5">
           <h2 className="mb-3 font-semibold">
             Current menu ({items.length} items)
           </h2>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-line">
             {items.length === 0 && (
-              <p className="py-4 text-sm text-gray-400">No items yet.</p>
+              <p className="py-4 text-sm text-faint">No items yet.</p>
             )}
             {items.map((item) => (
               <div
@@ -159,7 +159,7 @@ export default function RestaurantMenuPage() {
               >
                 <div>
                   <p className="font-medium">{item.name}</p>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-faint">
                     ~{item.prep_time_min} min prep
                   </p>
                 </div>
@@ -172,7 +172,7 @@ export default function RestaurantMenuPage() {
                         step="0.5"
                         value={editPrice}
                         onChange={(e) => setEditPrice(e.target.value)}
-                        className="w-20 rounded-lg border border-gray-300 px-2 py-1 text-sm focus:border-brand-500 focus:outline-none"
+                        className="w-20 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-foreground focus:border-brand-500 focus:outline-none"
                         aria-label={`Price for ${item.name}`}
                       />
                       <button
@@ -191,14 +191,14 @@ export default function RestaurantMenuPage() {
                           setEditingId(item.id);
                           setEditPrice(String(item.price));
                         }}
-                        className="text-xs font-medium text-brand-600 hover:underline"
+                        className="text-xs font-medium text-brand-400 hover:underline"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => removeItem(item.id)}
                         disabled={busy}
-                        className="text-xs font-medium text-red-600 hover:underline"
+                        className="text-xs font-medium text-red-400 hover:underline"
                       >
                         Delete
                       </button>

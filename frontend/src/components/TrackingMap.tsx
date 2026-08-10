@@ -32,7 +32,7 @@ export default function TrackingMap({ route, riderLat, riderLng }: Props) {
         zoomControl: true,
       });
       L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
         {
           attribution:
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
@@ -45,17 +45,17 @@ export default function TrackingMap({ route, riderLat, riderLng }: Props) {
       const bounds = L.latLngBounds(latlngs);
       if (bounds.isValid()) leafletMap.fitBounds(bounds.pad(0.15));
 
-      // Layered stroke: white casing under the brand line reads premium.
+      // Layered stroke: soft white glow under the bright brand line pops on dark tiles.
       if (latlngs.length > 1) {
         L.polyline(latlngs, {
           color: "#ffffff",
-          weight: 9,
-          opacity: 0.9,
+          weight: 8,
+          opacity: 0.25,
           lineCap: "round",
           lineJoin: "round",
         }).addTo(leafletMap);
         L.polyline(latlngs, {
-          color: "#ea580c",
+          color: "#f97316",
           weight: 4,
           opacity: 0.95,
           lineCap: "round",
@@ -112,5 +112,5 @@ export default function TrackingMap({ route, riderLat, riderLng }: Props) {
     map.panTo([riderLat, riderLng], { animate: !reduceMotion, duration: 0.5 });
   }, [riderLat, riderLng, map]);
 
-  return <div ref={mapRef} className="h-[420px] w-full shadow-[0_8px_24px_-12px_rgba(16,24,40,0.2)]" />;
+  return <div ref={mapRef} className="h-[420px] w-full shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]" />;
 }

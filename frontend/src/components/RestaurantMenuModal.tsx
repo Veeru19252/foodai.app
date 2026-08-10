@@ -46,32 +46,32 @@ export default function RestaurantMenuModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onClick={onClose}
     >
       <div
-        className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white shadow-xl"
+        className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl border border-line bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-5 py-4">
+        <div className="sticky top-0 flex items-center justify-between border-b border-line bg-card px-5 py-4">
           <div>
             <h2 className="text-lg font-bold">{restaurant.name}</h2>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-muted">
               {restaurant.cuisine} · ★ {restaurant.rating.toFixed(1)}
             </p>
           </div>
           <button
             onClick={onClose}
-            className="grid h-8 w-8 place-items-center rounded-full bg-gray-100 hover:bg-gray-200"
+            className="grid h-8 w-8 place-items-center rounded-full bg-surface hover:bg-elevated"
             aria-label="Close"
           >
             ×
           </button>
         </div>
 
-        <div className="divide-y divide-gray-100">
+        <div className="divide-y divide-line">
           {error && (
-            <p className="px-5 py-3 text-sm text-red-600">{error}</p>
+            <p className="px-5 py-3 text-sm text-red-400">{error}</p>
           )}
           {menu.map((item) => {
             const qty =
@@ -80,8 +80,8 @@ export default function RestaurantMenuModal({
               <div key={item.id} className="flex items-center justify-between px-5 py-4">
                 <div>
                   <p className="font-medium">{item.name}</p>
-                  <p className="text-sm text-gray-500">₹{item.price.toFixed(0)}</p>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-sm text-muted">₹{item.price.toFixed(0)}</p>
+                  <p className="text-xs text-faint">
                     ~{item.prep_time_min} min prep
                   </p>
                 </div>
@@ -97,15 +97,15 @@ export default function RestaurantMenuModal({
                         quantity: 1,
                       })
                     }
-                    className="rounded-full border-2 border-brand-600 px-4 py-1.5 text-sm font-semibold text-brand-600 hover:bg-brand-50"
+                    className="rounded-full border-2 border-brand-500 px-4 py-1.5 text-sm font-semibold text-brand-400 hover:bg-brand-500/10"
                   >
                     ADD
                   </button>
                 ) : (
-                  <div className="flex items-center gap-3 rounded-full border-2 border-brand-600 px-2 py-1">
+                  <div className="flex items-center gap-3 rounded-full border-2 border-brand-500 px-2 py-1">
                     <button
                       onClick={() => setQuantity(item.id, qty - 1)}
-                      className="h-6 w-6 text-brand-600"
+                      className="h-6 w-6 text-brand-400"
                     >
                       −
                     </button>
@@ -121,7 +121,7 @@ export default function RestaurantMenuModal({
                           quantity: 1,
                         })
                       }
-                      className="h-6 w-6 text-brand-600"
+                      className="h-6 w-6 text-brand-400"
                     >
                       +
                     </button>
@@ -133,22 +133,22 @@ export default function RestaurantMenuModal({
         </div>
 
         {suggested.length > 0 && (
-          <div className="border-t border-brand-100 bg-brand-50/40 px-5 py-4">
-            <p className="mb-1 text-sm font-semibold text-brand-900">
+          <div className="border-t border-brand-500/20 bg-brand-500/5 px-5 py-4">
+            <p className="mb-1 text-sm font-semibold text-brand-300">
               People also order
             </p>
-            <p className="mb-3 text-xs text-gray-500">
+            <p className="mb-3 text-xs text-muted">
               AI picks based on popularity + your past orders
             </p>
             <div className="space-y-2">
               {suggested.slice(0, 3).map((r) => (
                 <div
                   key={r.menu_item_id}
-                  className="flex items-center justify-between rounded-xl bg-white px-3 py-2 shadow-sm"
+                  className="flex items-center justify-between rounded-xl bg-surface px-3 py-2"
                 >
                   <div>
                     <p className="text-sm font-medium">{r.name}</p>
-                    <p className="text-xs text-gray-400">{r.reason}</p>
+                    <p className="text-xs text-faint">{r.reason}</p>
                   </div>
                   <button
                     onClick={() =>
@@ -161,7 +161,7 @@ export default function RestaurantMenuModal({
                         quantity: 1,
                       })
                     }
-                    className="rounded-full border-2 border-brand-600 px-3 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-50"
+                    className="rounded-full border-2 border-brand-500 px-3 py-1 text-xs font-semibold text-brand-400 hover:bg-brand-500/10"
                   >
                     ADD ₹{r.price.toFixed(0)}
                   </button>
@@ -172,7 +172,7 @@ export default function RestaurantMenuModal({
         )}
 
         {reviews.length > 0 && (
-          <div className="border-t border-gray-100 px-5 py-4">
+          <div className="border-t border-line px-5 py-4">
             <p className="mb-2 text-sm font-semibold">
               ⭐ {restaurant.reviews_rating.toFixed(1)} · {reviews.length} review
               {reviews.length === 1 ? "" : "s"}
@@ -182,13 +182,13 @@ export default function RestaurantMenuModal({
                 <div key={r.id} className="text-sm">
                   <p className="font-medium">
                     {"★".repeat(r.rating)}
-                    <span className="text-gray-300">{"★".repeat(5 - r.rating)}</span>{" "}
-                    <span className="text-xs font-normal text-gray-500">
+                    <span className="text-faint">{"★".repeat(5 - r.rating)}</span>{" "}
+                    <span className="text-xs font-normal text-muted">
                       {r.user_name}
                     </span>
                   </p>
                   {r.comment && (
-                    <p className="text-gray-600">{r.comment}</p>
+                    <p className="text-secondary">{r.comment}</p>
                   )}
                 </div>
               ))}

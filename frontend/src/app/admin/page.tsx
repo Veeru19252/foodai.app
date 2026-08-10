@@ -15,10 +15,10 @@ const ZONE_COLORS: Record<string, string> = {
 };
 
 const ROLE_COLORS: Record<string, string> = {
-  customer: "bg-blue-100 text-blue-700",
-  restaurant: "bg-amber-100 text-amber-700",
-  delivery: "bg-violet-100 text-violet-700",
-  admin: "bg-red-100 text-red-700",
+  customer: "bg-blue-500/15 text-blue-300",
+  restaurant: "bg-amber-500/15 text-amber-300",
+  delivery: "bg-violet-500/15 text-violet-300",
+  admin: "bg-red-500/15 text-red-300",
 };
 
 export default function AdminPage() {
@@ -116,15 +116,15 @@ export default function AdminPage() {
       <h1 className="mb-6 text-2xl font-bold">Admin dashboard</h1>
 
       {error && (
-        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="mb-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
           {error}
         </p>
       )}
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {statCards.map((s) => (
-          <div key={s.label} className="rounded-2xl border border-gray-200 bg-white p-5">
-            <p className="text-xs text-gray-500">{s.label}</p>
+          <div key={s.label} className="rounded-2xl border border-line bg-card p-5">
+            <p className="text-xs text-muted">{s.label}</p>
             <p className="text-2xl font-bold">{s.value}</p>
           </div>
         ))}
@@ -132,18 +132,18 @@ export default function AdminPage() {
 
       {overview && (
         <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="rounded-2xl border border-gray-200 bg-white p-5">
+          <div className="rounded-2xl border border-line bg-card p-5">
             <h2 className="mb-3 font-semibold">Users by role</h2>
             <div className="flex gap-3">
               {Object.entries(overview.users).map(([role, count]) => (
-                <div key={role} className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                <div key={role} className="rounded-lg bg-surface px-3 py-2 text-sm">
                   <span className="font-semibold">{count}</span>{" "}
-                  <span className="text-gray-500">{role}</span>
+                  <span className="text-muted">{role}</span>
                 </div>
               ))}
             </div>
           </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-5">
+          <div className="rounded-2xl border border-line bg-card p-5">
             <h2 className="mb-3 font-semibold">Orders by status</h2>
             <div className="flex flex-wrap gap-2">
               {Object.entries(overview.orders_by_status).map(([status, count]) => (
@@ -158,14 +158,14 @@ export default function AdminPage() {
       )}
 
       {forecast && (
-        <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-5">
+        <div className="mb-6 rounded-2xl border border-line bg-card p-5">
           <div className="mb-1 flex items-center justify-between">
             <h2 className="font-semibold">Demand forecast (next 6 hours)</h2>
-            <span className="text-xs text-gray-400">
+            <span className="text-xs text-faint">
               AI · XGBoost demand model
             </span>
           </div>
-          <p className="mb-4 text-xs text-gray-500">
+          <p className="mb-4 text-xs text-muted">
             Predicted orders per delivery zone, per hour.
             {forecast.fallback &&
               " (using the moving-average fallback — the trained model is unavailable)"}
@@ -182,20 +182,20 @@ export default function AdminPage() {
               const total = Object.values(item.zones).reduce((a, b) => a + b, 0);
               return (
                 <div key={item.label} className="flex items-center gap-3">
-                  <div className="w-14 shrink-0 text-right text-xs text-gray-500">
+                  <div className="w-14 shrink-0 text-right text-xs text-muted">
                     {item.label}
                   </div>
-                  <div className="flex h-6 flex-1 overflow-hidden rounded-full bg-gray-100">
+                  <div className="flex h-6 flex-1 overflow-hidden rounded-full bg-line">
                     {Object.entries(item.zones).map(([zone, count]) => (
                       <div
                         key={zone}
-                        className={`${ZONE_COLORS[zone] ?? "bg-gray-400"} h-full`}
+                        className={`${ZONE_COLORS[zone] ?? "bg-elevated"} h-full`}
                         style={{ width: `${(count / maxTotal) * 100}%` }}
                         title={`Zone ${zone}: ${count}`}
                       />
                     ))}
                   </div>
-                  <div className="w-14 shrink-0 text-xs font-semibold text-gray-600">
+                  <div className="w-14 shrink-0 text-xs font-semibold text-secondary">
                     {total.toFixed(1)}
                   </div>
                 </div>
@@ -205,20 +205,20 @@ export default function AdminPage() {
 
           <div className="mt-3 flex flex-wrap gap-3">
             {Object.entries(ZONE_COLORS).map(([zone, color]) => (
-              <span key={zone} className="flex items-center gap-1.5 text-xs text-gray-500">
+              <span key={zone} className="flex items-center gap-1.5 text-xs text-muted">
                 <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
                 Zone {zone}
               </span>
             ))}
           </div>
 
-          <div className="mt-4 border-t border-gray-100 pt-4">
+          <div className="mt-4 border-t border-line pt-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-gray-700">
+                <p className="text-sm font-semibold text-foreground">
                   Retrain demand model
                 </p>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-faint">
                   Re-runs the XGBoost training on the historical corpus plus
                   every live order, then swaps the model the forecast reads.
                 </p>
@@ -233,39 +233,39 @@ export default function AdminPage() {
             </div>
 
             {retrainError && (
-              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
                 {retrainError}
               </p>
             )}
 
             {retrainResult && (
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="rounded-xl bg-gray-50 p-3">
-                  <p className="text-xs text-gray-500">Samples</p>
+                <div className="rounded-xl bg-surface p-3">
+                  <p className="text-xs text-muted">Samples</p>
                   <p className="text-sm font-semibold">
                     {retrainResult.samples.total.toLocaleString()} orders
                   </p>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-faint">
                     {retrainResult.samples.corpus.toLocaleString()} historical ·{" "}
                     {retrainResult.samples.live.toLocaleString()} live
                   </p>
                 </div>
-                <div className="rounded-xl bg-gray-50 p-3">
-                  <p className="text-xs text-gray-500">XGBoost MAE</p>
+                <div className="rounded-xl bg-surface p-3">
+                  <p className="text-xs text-muted">XGBoost MAE</p>
                   <p className="text-sm font-semibold">
                     {retrainResult.metrics.xgboost.mae.toFixed(3)}
                   </p>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-faint">
                     baseline (moving avg):{" "}
                     {retrainResult.metrics.moving_average.mae.toFixed(3)}
                   </p>
                 </div>
-                <div className="rounded-xl bg-gray-50 p-3">
-                  <p className="text-xs text-gray-500">XGBoost MAPE</p>
+                <div className="rounded-xl bg-surface p-3">
+                  <p className="text-xs text-muted">XGBoost MAPE</p>
                   <p className="text-sm font-semibold">
                     {(retrainResult.metrics.xgboost.mape * 100).toFixed(1)}%
                   </p>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-faint">
                     baseline:{" "}
                     {(retrainResult.metrics.moving_average.mape * 100).toFixed(1)}%
                   </p>
@@ -276,7 +276,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-5">
+      <div className="mb-6 rounded-2xl border border-line bg-card p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold">Users</h2>
           <input
@@ -284,12 +284,12 @@ export default function AdminPage() {
             value={userFilter}
             onChange={(e) => setUserFilter(e.target.value)}
             placeholder="Filter by name, email or role"
-            className="w-56 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none"
+            className="w-56 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
           />
         </div>
-        <div className="max-h-80 divide-y divide-gray-100 overflow-y-auto">
+        <div className="max-h-80 divide-y divide-line overflow-y-auto">
           {filteredUsers.length === 0 ? (
-            <p className="py-4 text-sm text-gray-400">No users match.</p>
+            <p className="py-4 text-sm text-faint">No users match.</p>
           ) : (
             filteredUsers.map((u) => (
               <div
@@ -298,12 +298,12 @@ export default function AdminPage() {
               >
                 <div className="min-w-0">
                   <p className="truncate font-medium">{u.name}</p>
-                  <p className="truncate text-xs text-gray-500">{u.email}</p>
+                  <p className="truncate text-xs text-muted">{u.email}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      ROLE_COLORS[u.role] ?? "bg-gray-100 text-gray-600"
+                      ROLE_COLORS[u.role] ?? "bg-surface text-muted"
                     }`}
                   >
                     {u.role}
@@ -311,7 +311,7 @@ export default function AdminPage() {
                   <select
                     value={u.role}
                     onChange={(e) => changeRole(u.id, e.target.value as Role)}
-                    className="rounded-lg border border-gray-300 px-2 py-1 text-xs focus:border-brand-500 focus:outline-none"
+                    className="rounded-lg border border-line bg-surface px-2 py-1 text-xs text-foreground focus:border-brand-500 focus:outline-none"
                     aria-label={`Change role for ${u.name}`}
                   >
                     <option value="customer">customer</option>
@@ -326,9 +326,9 @@ export default function AdminPage() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-gray-200 bg-white p-5">
+      <div className="rounded-2xl border border-line bg-card p-5">
         <h2 className="mb-3 font-semibold">Recent orders</h2>
-        <div className="divide-y divide-gray-100">
+        <div className="divide-y divide-line">
           {orders.slice(0, 10).map((o) => (
             <div key={o.id} className="flex items-center justify-between py-2 text-sm">
               <span>

@@ -43,7 +43,7 @@ export default function LoginPage() {
         <h1 className="mt-4 text-center text-2xl font-bold tracking-tight">
           Welcome back
         </h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-muted">
           Sign in to FoodAI to order, deliver, or manage
         </p>
       </div>
@@ -52,7 +52,7 @@ export default function LoginPage() {
         className="card-premium space-y-4 p-6"
       >
         {error && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
             {error}
           </p>
         )}
@@ -66,7 +66,7 @@ export default function LoginPage() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 bg-white/70 px-3 py-2 transition-[border-color,box-shadow] duration-150 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+            className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint transition-[border-color,box-shadow] duration-150 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="customer@foodai.com"
           />
         </div>
@@ -80,7 +80,7 @@ export default function LoginPage() {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 bg-white/70 px-3 py-2 transition-[border-color,box-shadow] duration-150 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+            className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint transition-[border-color,box-shadow] duration-150 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             placeholder="password123"
           />
         </div>
@@ -91,13 +91,13 @@ export default function LoginPage() {
         >
           {busy ? "Logging in…" : "Log in"}
         </button>
-        <p className="text-center text-sm text-gray-500">
+        <p className="text-center text-sm text-muted">
           New here?{" "}
-          <Link href="/register" className="font-medium text-brand-600 transition-colors duration-150 hover:text-brand-700 hover:underline">
+          <Link href="/register" className="font-medium text-brand-400 transition-colors duration-150 hover:text-brand-300 hover:underline">
             Create an account
           </Link>
         </p>
-        <div className="rounded-xl bg-gray-50/80 px-3 py-2 text-xs text-gray-500 ring-1 ring-gray-100">
+        <div className="rounded-xl bg-surface/80 px-3 py-2 text-xs text-muted ring-1 ring-line">
           Demo accounts — password: <code>password123</code>
           <br />
           customer@foodai.com · spice@foodai.com · rider@foodai.com ·

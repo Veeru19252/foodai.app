@@ -45,33 +45,33 @@ export default function RestaurantReviewsPage() {
       <h1 className="mb-6 text-2xl font-bold">Customer reviews</h1>
 
       {error && (
-        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="mb-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
           {error}
         </p>
       )}
 
       <div className="space-y-4">
         {reviews.length === 0 && (
-          <div className="rounded-2xl border border-gray-200 bg-white p-10 text-center text-gray-400">
+          <div className="rounded-2xl border border-line bg-card p-10 text-center text-faint">
             No reviews yet — they appear here once customers rate your food.
           </div>
         )}
         {reviews.map((r) => (
-          <div key={r.id} className="rounded-2xl border border-gray-200 bg-white p-5">
+          <div key={r.id} className="rounded-2xl border border-line bg-card p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="font-semibold">{r.user_name}</span>
                 <span className="text-amber-400">
                   {"★".repeat(r.rating)}
-                  <span className="text-gray-300">{"★".repeat(5 - r.rating)}</span>
+                  <span className="text-faint">{"★".repeat(5 - r.rating)}</span>
                 </span>
               </div>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-faint">
                 {new Date(r.created_at).toLocaleDateString()}
               </span>
             </div>
 
-            {r.comment && <p className="mt-2 text-sm text-gray-700">{r.comment}</p>}
+            {r.comment && <p className="mt-2 text-sm text-secondary">{r.comment}</p>}
 
             {r.photo_url && (
               // eslint-disable-next-line @next/next/no-img-element
@@ -83,11 +83,11 @@ export default function RestaurantReviewsPage() {
             )}
 
             {r.owner_reply ? (
-              <div className="mt-3 rounded-xl bg-brand-50 px-3 py-2 text-sm">
-                <p className="mb-1 text-xs font-semibold uppercase text-brand-700">
+              <div className="mt-3 rounded-xl bg-brand-500/10 px-3 py-2 text-sm">
+                <p className="mb-1 text-xs font-semibold uppercase text-brand-300">
                   Your reply
                 </p>
-                <p className="text-gray-700">{r.owner_reply}</p>
+                <p className="text-secondary">{r.owner_reply}</p>
               </div>
             ) : (
               <div className="mt-3 flex gap-2">
@@ -98,7 +98,7 @@ export default function RestaurantReviewsPage() {
                     setReplyText((prev) => ({ ...prev, [r.id]: e.target.value }))
                   }
                   placeholder="Thank the customer…"
-                  className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
+                  className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                 />
                 <button
                   onClick={() => reply(r.id)}

@@ -137,16 +137,16 @@ export default function OrdersPage() {
       <h1 className="mb-6 text-2xl font-bold">My orders</h1>
 
       {error && (
-        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="mb-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
           {error}
         </p>
       )}
 
       {loading ? (
-        <p className="py-16 text-center text-gray-400">Loading…</p>
+        <p className="py-16 text-center text-faint">Loading…</p>
       ) : orders.length === 0 ? (
-        <div className="rounded-2xl border border-gray-200 bg-white p-10 text-center">
-          <p className="mb-4 text-gray-500">No orders yet.</p>
+        <div className="rounded-2xl border border-line bg-card p-10 text-center">
+          <p className="mb-4 text-muted">No orders yet.</p>
           <Link
             href="/restaurants"
             className="rounded-lg bg-brand-600 px-4 py-2 font-semibold text-white hover:bg-brand-700"
@@ -169,7 +169,7 @@ export default function OrdersPage() {
             return (
               <div
                 key={o.id}
-                className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm"
+                className="rounded-2xl border border-line bg-card px-5 py-4 shadow-sm"
               >
                 <Link
                   href={`/tracking/${o.id}`}
@@ -177,7 +177,7 @@ export default function OrdersPage() {
                 >
                   <div>
                     <p className="font-semibold">{o.restaurant_name}</p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-muted">
                       #{o.id} · {new Date(o.created_at).toLocaleString()}
                       {o.delivery_city ? ` · ${o.delivery_city}` : ""}
                     </p>
@@ -185,7 +185,7 @@ export default function OrdersPage() {
                   <div className="flex items-center gap-4">
                     <span className="font-semibold">₹{o.total.toFixed(0)}</span>
                     {o.scheduled_for && (
-                      <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                      <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-semibold text-blue-300">
                         Scheduled · {fmtDateTime(o.scheduled_for)}
                       </span>
                     )}
@@ -207,13 +207,13 @@ export default function OrdersPage() {
                   </div>
                 </Link>
                 {steps.length > 0 && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
                     {steps.map((s, i) => (
                       <span key={s.label} className="flex items-center gap-2">
-                        {i > 0 && <span className="text-gray-300">→</span>}
+                        {i > 0 && <span className="text-faint">→</span>}
                         <span>
                           {s.label}{" "}
-                          <span className="font-medium text-gray-700">
+                          <span className="font-medium text-secondary">
                             {s.time}
                           </span>
                         </span>
@@ -221,11 +221,11 @@ export default function OrdersPage() {
                     ))}
                   </div>
                 )}
-                <div className="mt-3 flex gap-2 border-t border-gray-100 pt-3">
+                <div className="mt-3 flex gap-2 border-t border-line pt-3">
                   {o.status !== "CANCELLED" && (
                     <Link
                       href={`/tracking/${o.id}`}
-                      className="text-sm font-semibold text-brand-600 hover:underline"
+                      className="text-sm font-semibold text-brand-400 hover:underline"
                     >
                       Track →
                     </Link>
@@ -244,14 +244,14 @@ export default function OrdersPage() {
                       <button
                         onClick={() => markCodCollected(o.id)}
                         disabled={busyId === o.id}
-                        className="text-sm font-semibold text-emerald-600 hover:underline disabled:opacity-60"
+                        className="text-sm font-semibold text-emerald-400 hover:underline disabled:opacity-60"
                       >
                         {busyId === o.id ? "Updating…" : "Mark COD collected"}
                       </button>
                     )}
                   <button
                     onClick={() => openReceipt(o)}
-                    className="text-sm font-semibold text-gray-600 hover:underline"
+                    className="text-sm font-semibold text-secondary hover:underline"
                   >
                     Receipt
                   </button>
@@ -259,18 +259,18 @@ export default function OrdersPage() {
                     <button
                       onClick={() => cancelOrder(o.id)}
                       disabled={busyId === o.id}
-                      className="text-sm font-medium text-red-600 hover:underline disabled:opacity-60"
+                      className="text-sm font-medium text-red-400 hover:underline disabled:opacity-60"
                     >
                       {busyId === o.id ? "Cancelling…" : "Cancel order"}
                     </button>
                   )}
                   {o.status === "DELIVERED" &&
                     (reviewed ? (
-                      <span className="text-sm text-gray-400">✓ Reviewed</span>
+                      <span className="text-sm text-faint">✓ Reviewed</span>
                     ) : (
                       <button
                         onClick={() => setReviewTarget(o)}
-                        className="text-sm font-semibold text-amber-600 hover:underline"
+                        className="text-sm font-semibold text-amber-400 hover:underline"
                       >
                         Rate order
                       </button>
@@ -296,27 +296,27 @@ export default function OrdersPage() {
 
       {receiptTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
           onClick={() => setReceiptTarget(null)}
         >
           <div
-            className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-xl"
+            className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-line bg-card p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-lg font-bold">
               Receipt · {receiptTarget.restaurant_name}
             </h2>
-            <p className="mb-4 text-xs text-gray-500">Order #{receiptTarget.id}</p>
+            <p className="mb-4 text-xs text-muted">Order #{receiptTarget.id}</p>
 
             {receiptError && (
-              <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p className="mb-3 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
                 {receiptError}
               </p>
             )}
 
             {receipt && (
               <>
-                <div className="divide-y divide-gray-100">
+                <div className="divide-y divide-line">
                   {receipt.items.map((item, i) => (
                     <div
                       key={i}
@@ -331,22 +331,22 @@ export default function OrdersPage() {
                     </div>
                   ))}
                 </div>
-                <div className="mt-3 space-y-1 border-t border-gray-100 pt-3 text-sm">
+                <div className="mt-3 space-y-1 border-t border-line pt-3 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Food total</span>
+                    <span className="text-muted">Food total</span>
                     <span>₹{receipt.food_total.toFixed(0)}</span>
                   </div>
                   {receipt.discount_amount > 0 && (
-                    <div className="flex justify-between text-green-600">
+                    <div className="flex justify-between text-emerald-400">
                       <span>Promo discount</span>
                       <span>−₹{receipt.discount_amount.toFixed(0)}</span>
                     </div>
                   )}
                   <div className="flex justify-between">
-                    <span className="text-gray-500">
+                    <span className="text-muted">
                       Delivery fee
                       {receipt.surge_multiplier > 1.0 && (
-                        <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
+                        <span className="ml-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-300">
                           {receipt.surge_multiplier.toFixed(1)}×
                         </span>
                       )}
@@ -358,7 +358,7 @@ export default function OrdersPage() {
                     <span>₹{receipt.grand_total.toFixed(0)}</span>
                   </div>
                 </div>
-                <p className="mt-3 text-xs text-gray-400">
+                <p className="mt-3 text-xs text-faint">
                   Paid by {receipt.payment_method} · {receipt.payment_status}
                   {receipt.billed_to ? ` · ${receipt.billed_to}` : ""}
                 </p>
@@ -371,7 +371,7 @@ export default function OrdersPage() {
                   </button>
                   <button
                     onClick={() => setReceiptTarget(null)}
-                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 font-medium hover:bg-gray-100"
+                    className="flex-1 rounded-lg border border-line px-3 py-2 font-medium text-secondary hover:bg-surface"
                   >
                     Close
                   </button>
@@ -380,8 +380,8 @@ export default function OrdersPage() {
                   <p
                     className={`mt-2 text-center text-xs ${
                       emailNote.startsWith("Receipt")
-                        ? "text-green-600"
-                        : "text-red-600"
+                        ? "text-emerald-400"
+                        : "text-red-400"
                     }`}
                   >
                     {emailNote}

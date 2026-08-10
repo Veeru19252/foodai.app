@@ -106,7 +106,7 @@ export default function NotificationBell() {
         onClick={toggle}
         aria-label="Notifications"
         className={`relative grid h-9 w-9 place-items-center rounded-full transition ${
-          connected ? "bg-brand-50 text-brand-600" : "bg-gray-100 text-gray-500"
+          connected ? "bg-brand-500/15 text-brand-400" : "bg-surface text-muted"
         }`}
       >
         🔔
@@ -118,8 +118,8 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-11 z-50 w-80 rounded-2xl border border-gray-200 bg-white shadow-xl">
-          <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+        <div className="absolute right-0 top-11 z-50 w-80 rounded-2xl border border-line bg-card shadow-2xl">
+          <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <p className="font-semibold">Notifications</p>
             <button
               onClick={() => {
@@ -127,28 +127,28 @@ export default function NotificationBell() {
                 setUnread(0);
                 notificationApi.markAllRead().catch(() => undefined);
               }}
-              className="text-xs font-medium text-brand-600 hover:underline"
+              className="text-xs font-medium text-brand-400 hover:underline"
             >
               Clear all
             </button>
           </div>
           {notifications.length === 0 ? (
-            <p className="px-4 py-8 text-center text-sm text-gray-400">
+            <p className="px-4 py-8 text-center text-sm text-faint">
               {connected ? "No notifications yet" : "Reconnecting…"}
             </p>
           ) : (
-            <ul className="max-h-72 divide-y divide-gray-100 overflow-y-auto">
+            <ul className="max-h-72 divide-y divide-line overflow-y-auto">
               {notifications.map((n) => (
                 <li
                   key={n.id}
-                  className={`px-4 py-3 text-sm ${n.read ? "" : "bg-brand-50/40"}`}
+                  className={`px-4 py-3 text-sm ${n.read ? "" : "bg-brand-500/10"}`}
                 >
                   <p className="font-medium">{n.message || n.title}</p>
                   {n.order_id && (
                     <Link
                       href={`/tracking/${n.order_id}`}
                       onClick={() => setOpen(false)}
-                      className="mt-1 inline-block text-xs font-semibold text-brand-600 hover:underline"
+                      className="mt-1 inline-block text-xs font-semibold text-brand-400 hover:underline"
                     >
                       View order →
                     </Link>

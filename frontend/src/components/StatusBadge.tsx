@@ -1,17 +1,17 @@
 const STATUS_STYLES: Record<string, string> = {
-  PLACED: "bg-blue-100 text-blue-700",
-  CONFIRMED: "bg-indigo-100 text-indigo-700",
-  PREPARING: "bg-amber-100 text-amber-700",
-  OUT_FOR_DELIVERY: "bg-orange-100 text-orange-700",
-  DELIVERED: "bg-green-100 text-green-700",
-  CANCELLED: "bg-red-100 text-red-700",
+  PLACED: "bg-blue-500/15 text-blue-300",
+  CONFIRMED: "bg-indigo-500/15 text-indigo-300",
+  PREPARING: "bg-amber-500/15 text-amber-300",
+  OUT_FOR_DELIVERY: "bg-orange-500/15 text-orange-300",
+  DELIVERED: "bg-emerald-500/15 text-emerald-300",
+  CANCELLED: "bg-red-500/15 text-red-300",
 };
 
 export default function StatusBadge({ status }: { status: string }) {
   return (
     <span
       className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-        STATUS_STYLES[status] ?? "bg-gray-100 text-gray-600"
+        STATUS_STYLES[status] ?? "bg-surface text-muted"
       }`}
     >
       {status.replaceAll("_", " ")}

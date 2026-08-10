@@ -89,44 +89,44 @@ export default function DriverPage() {
       <h1 className="mb-6 text-2xl font-bold">My deliveries</h1>
 
       {error && (
-        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="mb-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
           {error}
         </p>
       )}
 
       {earnings && (
-        <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-5">
+        <div className="mb-6 rounded-2xl border border-line bg-card p-5">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-semibold">Earnings</h2>
-            <span className="text-xs text-gray-400">
+            <span className="text-xs text-faint">
               ₹{earnings.per_delivery_rate}/order + ₹{earnings.per_km_rate}/km
             </span>
           </div>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div>
-              <p className="text-xs text-gray-500">Total earned</p>
+              <p className="text-xs text-muted">Total earned</p>
               <p className="text-2xl font-bold">
                 ₹{earnings.total_earnings.toFixed(0)}
               </p>
             </div>
             <div>
-              <p className="text-xs text-gray-500">Delivered</p>
+              <p className="text-xs text-muted">Delivered</p>
               <p className="text-2xl font-bold">
                 {earnings.completed_deliveries}
               </p>
             </div>
             <div>
-              <p className="text-xs text-gray-500">Active</p>
+              <p className="text-xs text-muted">Active</p>
               <p className="text-2xl font-bold">{earnings.active_deliveries}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-500">All-time trips</p>
+              <p className="text-xs text-muted">All-time trips</p>
               <p className="text-2xl font-bold">{earnings.total_deliveries}</p>
             </div>
           </div>
           {earnings.recent.some((r) => r.completed_at) && (
-            <div className="mt-3 border-t border-gray-100 pt-3">
-              <p className="mb-2 text-xs font-semibold text-gray-500">
+            <div className="mt-3 border-t border-line pt-3">
+              <p className="mb-2 text-xs font-semibold text-muted">
                 Recent trips
               </p>
               <div className="space-y-1">
@@ -138,7 +138,7 @@ export default function DriverPage() {
                       key={r.delivery_id}
                       className="flex items-center justify-between text-sm"
                     >
-                      <span className="text-gray-600">
+                      <span className="text-secondary">
                         #{r.order_id} · {r.restaurant_name} ·{" "}
                         {r.distance_km.toFixed(1)} km
                       </span>
@@ -154,7 +154,7 @@ export default function DriverPage() {
       )}
 
       {deliveries.length === 0 && (
-        <p className="py-16 text-center text-gray-400">
+        <p className="py-16 text-center text-faint">
           No deliveries assigned yet. Restaurants will assign you when orders
           are ready — you&apos;ll get a notification.
         </p>
@@ -167,15 +167,15 @@ export default function DriverPage() {
             <div
               key={d.delivery_id}
               data-testid={`driver-delivery-${d.order_id}`}
-              className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
+              className="rounded-2xl border border-line bg-card p-5 shadow-sm"
             >
               <div className="mb-2 flex items-center justify-between">
                 <p className="font-semibold">Order #{d.order_id}</p>
                 <StatusBadge status={d.order_status} />
               </div>
-              <p className="text-sm text-gray-600">{d.restaurant_name}</p>
-              <p className="text-sm text-gray-500">→ {d.customer_name}</p>
-              <p className="mt-1 text-xs text-gray-400">
+              <p className="text-sm text-secondary">{d.restaurant_name}</p>
+              <p className="text-sm text-muted">→ {d.customer_name}</p>
+              <p className="mt-1 text-xs text-faint">
                 {d.pickup_time
                   ? `Picked up ${new Date(d.pickup_time).toLocaleTimeString()}`
                   : "Not picked up yet"}
@@ -185,8 +185,8 @@ export default function DriverPage() {
                 <p
                   className={`mt-2 rounded-lg px-3 py-2 text-sm font-medium ${
                     nudge.risk === "HIGH"
-                      ? "bg-red-50 text-red-700"
-                      : "bg-amber-50 text-amber-700"
+                      ? "bg-red-500/10 text-red-300"
+                      : "bg-amber-500/10 text-amber-300"
                   }`}
                 >
                   ⚠ {nudge.message}
@@ -217,7 +217,7 @@ export default function DriverPage() {
               )}
 
               {d.order_status === "DELIVERED" && (
-                <p className="mt-3 text-sm font-medium text-green-600">
+                <p className="mt-3 text-sm font-medium text-emerald-400">
                   Delivered ✓
                 </p>
               )}
@@ -291,13 +291,13 @@ function ShareLocationButton({ orderId }: { orderId: number }) {
     <div className="flex items-center gap-2">
       {active ? (
         <>
-          <span className="inline-flex items-center gap-1.5 rounded-lg bg-green-50 px-3 py-1.5 text-sm font-medium text-green-700">
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-3 py-1.5 text-sm font-medium text-emerald-300">
             <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
             Sharing location{lastSent ? ` · ${lastSent}` : "…"}
           </span>
           <button
             onClick={stop}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+            className="rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-secondary hover:bg-surface"
           >
             Stop
           </button>
@@ -305,12 +305,12 @@ function ShareLocationButton({ orderId }: { orderId: number }) {
       ) : (
         <button
           onClick={start}
-          className="inline-block rounded-lg border border-brand-300 bg-white px-3 py-1.5 text-sm font-semibold text-brand-700 hover:bg-brand-50"
+          className="inline-block rounded-lg border border-brand-500/40 bg-card px-3 py-1.5 text-sm font-semibold text-brand-300 hover:bg-brand-500/10"
         >
           📍 Share live location
         </button>
       )}
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </div>
   );
 }
