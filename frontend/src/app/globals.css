@@ -4,14 +4,176 @@
 
 :root {
   --brand: #ea580c;
+  /* Strong custom easing curves (Emil Kowalski's design-eng playbook).
+     Built-in CSS easings are too weak; these make motion feel intentional. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-snappy: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 body {
   @apply bg-gray-50 text-gray-900 antialiased;
 }
 
-/* Leaflet is loaded on the tracking/checkout pages only. */
+/* ── Press feedback: respond on pointer-down, instant, always under 200ms ── */
+.press {
+  transition: transform 120ms var(--ease-out);
+}
+.press:active {
+  transform: scale(0.97);
+}
+
+/* ── Premium cards: layered shadow, hover lift only on fine pointers ────── */
+.card-premium {
+  @apply rounded-2xl border border-gray-200/80 bg-white;
+  box-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.04),
+    0 8px 24px -12px rgba(16, 24, 40, 0.12);
+  transition:
+    transform 200ms var(--ease-out),
+    box-shadow 200ms var(--ease-out),
+    border-color 200ms ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .card-premium:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 1px 2px rgba(16, 24, 40, 0.05),
+      0 20px 40px -16px rgba(16, 24, 40, 0.18);
+    border-color: rgb(229 231 235);
+  }
+}
+
+/* ── Glass material: translucent chrome (content scrolls underneath) ────── */
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+/* ── Entrance: rise-in + stagger (30–80ms between items, decorative only) ─ */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise-in {
+  animation: rise-in 400ms var(--ease-out) both;
+}
+.stagger > * {
+  animation: rise-in 400ms var(--ease-out) both;
+}
+.stagger > *:nth-child(2) {
+  animation-delay: 50ms;
+}
+.stagger > *:nth-child(3) {
+  animation-delay: 100ms;
+}
+.stagger > *:nth-child(4) {
+  animation-delay: 150ms;
+}
+.stagger > *:nth-child(5) {
+  animation-delay: 200ms;
+}
+.stagger > *:nth-child(6) {
+  animation-delay: 250ms;
+}
+.stagger > *:nth-child(7) {
+  animation-delay: 300ms;
+}
+.stagger > *:nth-child(8) {
+  animation-delay: 350ms;
+}
+
+/* ── Badge pop (cart count, notification dot) ───────────────────────────── */
+@keyframes pop {
+  0% {
+    transform: scale(0.5);
+  }
+  70% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.badge-pop {
+  animation: pop 300ms var(--ease-out);
+}
+
+/* ── Tracking rider marker: pulsing halo + gradient pin ─────────────────── */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+.leaflet-rider-pin {
+  position: relative;
+  width: 34px;
+  height: 34px;
+}
+.leaflet-rider-halo {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: rgba(234, 88, 12, 0.45);
+  animation: pulse-ring 1.6s var(--ease-out) infinite;
+}
+.leaflet-rider-dot {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #fb923c, #ea580c);
+  border: 3px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+}
+.leaflet-pin {
+  width: 30px;
+  height: 30px;
+  border-radius: 9999px;
+  background: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+/* ── Leaflet chrome (loaded on tracking/checkout pages only) ────────────── */
 .leaflet-container {
-  @apply rounded-xl;
+  @apply rounded-2xl;
   font: inherit;
+}
+.leaflet-control-zoom a {
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.leaflet-control-attribution {
+  font-size: 10px;
+}
+
+/* ── Reduced motion: gentler, non-vestibular equivalents, never none ────── */
+@media (prefers-reduced-motion: reduce) {
+  .rise-in,
+  .stagger > *,
+  .badge-pop,
+  .leaflet-rider-halo {
+    animation: none !important;
+  }
+  .press,
+  .card-premium {
+    transition-duration: 1ms;
+  }
 }

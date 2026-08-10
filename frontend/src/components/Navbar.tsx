@@ -24,13 +24,13 @@ export default function Navbar() {
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b border-gray-200 bg-white/90 backdrop-blur">
+    <header className="glass sticky top-0 z-40 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
         <Link href="/" className="flex items-center gap-2">
-          <span className="grid h-8 w-8 place-items-center rounded-full bg-brand-600 text-sm font-bold text-white">
+          <span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white shadow-sm">
             F
           </span>
-          <span className="text-lg font-bold text-gray-900">
+          <span className="text-lg font-bold tracking-tight text-gray-900">
             Food<span className="text-brand-600">AI</span>
           </span>
         </Link>
@@ -38,19 +38,22 @@ export default function Navbar() {
         <nav className="flex items-center gap-4 text-sm">
           {user?.role === "customer" && (
             <>
-              <Link href="/restaurants" className="font-medium hover:text-brand-600">
+              <Link href="/restaurants" className="font-medium text-gray-700 transition-colors duration-150 hover:text-brand-600">
                 Restaurants
               </Link>
-              <Link href="/orders" className="font-medium hover:text-brand-600">
+              <Link href="/orders" className="font-medium text-gray-700 transition-colors duration-150 hover:text-brand-600">
                 My Orders
               </Link>
               <Link
                 href="/checkout"
-                className="relative rounded-full bg-brand-600 px-3 py-1.5 font-semibold text-white hover:bg-brand-700"
+                className="press relative rounded-full bg-brand-600 px-3 py-1.5 font-semibold text-white shadow-sm shadow-brand-600/30 transition-colors duration-150 hover:bg-brand-700"
               >
                 Cart
                 {count > 0 && (
-                  <span className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-gray-900 text-[10px] text-white">
+                  <span
+                    key={count}
+                    className="badge-pop absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-gray-900 text-[10px] font-bold text-white"
+                  >
                     {count}
                   </span>
                 )}
@@ -59,30 +62,30 @@ export default function Navbar() {
           )}
           {user?.role === "restaurant" && (
             <>
-              <Link href="/restaurant/orders" className="font-medium hover:text-brand-600">
+              <Link href="/restaurant/orders" className="font-medium text-gray-700 transition-colors duration-150 hover:text-brand-600">
                 Orders
               </Link>
-              <Link href="/restaurant/menu" className="font-medium hover:text-brand-600">
+              <Link href="/restaurant/menu" className="font-medium text-gray-700 transition-colors duration-150 hover:text-brand-600">
                 Menu
               </Link>
-              <Link href="/restaurant/offers" className="font-medium hover:text-brand-600">
+              <Link href="/restaurant/offers" className="font-medium text-gray-700 transition-colors duration-150 hover:text-brand-600">
                 Offers
               </Link>
-              <Link href="/restaurant/reviews" className="font-medium hover:text-brand-600">
+              <Link href="/restaurant/reviews" className="font-medium text-gray-700 transition-colors duration-150 hover:text-brand-600">
                 Reviews
               </Link>
-              <Link href="/restaurant/analytics" className="font-medium hover:text-brand-600">
+              <Link href="/restaurant/analytics" className="font-medium text-gray-700 transition-colors duration-150 hover:text-brand-600">
                 Analytics
               </Link>
             </>
           )}
           {user?.role === "delivery" && (
-            <Link href="/driver" className="font-medium hover:text-brand-600">
+            <Link href="/driver" className="font-medium text-gray-700 transition-colors duration-150 hover:text-brand-600">
               My Deliveries
             </Link>
           )}
           {user?.role === "admin" && (
-            <Link href="/admin" className="font-medium hover:text-brand-600">
+            <Link href="/admin" className="font-medium text-gray-700 transition-colors duration-150 hover:text-brand-600">
               Dashboard
             </Link>
           )}
@@ -95,7 +98,7 @@ export default function Navbar() {
               </span>
               <button
                 onClick={handleLogout}
-                className="rounded-lg border border-gray-300 px-3 py-1.5 font-medium hover:bg-gray-100"
+                className="press rounded-lg border border-gray-300 bg-white/60 px-3 py-1.5 font-medium text-gray-700 transition-colors duration-150 hover:bg-gray-100"
               >
                 Log out
               </button>
@@ -103,7 +106,7 @@ export default function Navbar() {
           ) : (
             <Link
               href="/login"
-              className="rounded-lg border border-gray-300 px-3 py-1.5 font-medium hover:bg-gray-100"
+              className="press rounded-lg border border-gray-300 bg-white/60 px-3 py-1.5 font-medium text-gray-700 transition-colors duration-150 hover:bg-gray-100"
             >
               Log in
             </Link>

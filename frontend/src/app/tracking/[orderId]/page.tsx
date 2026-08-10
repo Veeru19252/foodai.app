@@ -181,7 +181,7 @@ export default function TrackingPage() {
     <ProtectedRoute>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Live tracking</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Live tracking</h1>
           <p className="text-sm text-gray-500">
             Order #{state.order_id} · {state.restaurant_name}
           </p>
@@ -210,19 +210,42 @@ export default function TrackingPage() {
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-2xl border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500">AI ETA</p>
-          <p className="text-2xl font-bold">{etaLabel}</p>
+        <div className="card-premium flex items-center gap-3 p-4">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-lg">
+            🕒
+          </span>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+              AI ETA
+            </p>
+            <p className="text-xl font-bold tracking-tight">{etaLabel}</p>
+          </div>
         </div>
-        <div className="rounded-2xl border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500">Distance</p>
-          <p className="text-2xl font-bold">{state.route_distance_km} km</p>
+        <div className="card-premium flex items-center gap-3 p-4">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-lg">
+            📏
+          </span>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+              Distance
+            </p>
+            <p className="text-xl font-bold tracking-tight">
+              {state.route_distance_km} km
+            </p>
+          </div>
         </div>
-        <div className="rounded-2xl border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500">Delivery to</p>
-          <p className="truncate text-sm font-medium">
-            {state.delivery_address ?? "—"}
-          </p>
+        <div className="card-premium flex items-center gap-3 p-4">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gray-100 text-lg">
+            📍
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+              Delivery to
+            </p>
+            <p className="truncate text-sm font-semibold">
+              {state.delivery_address ?? "—"}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -254,10 +277,13 @@ export default function TrackingPage() {
         </div>
       )}
 
-      <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-gray-200">
+      <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-gray-200/80">
         <div
-          className="h-full rounded-full bg-brand-600 transition-all"
-          style={{ width: `${progressPct}%` }}
+          className="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-600 shadow-[0_0_8px_rgba(234,88,12,0.5)]"
+          style={{
+            width: `${progressPct}%`,
+            transition: "width 700ms cubic-bezier(0.23, 1, 0.32, 1)",
+          }}
         />
       </div>
       <p className="mb-4 text-sm text-gray-500">
@@ -271,8 +297,13 @@ export default function TrackingPage() {
       <TrackingMap route={state.route} riderLat={state.rider_lat} riderLng={state.rider_lng} />
 
       <div className="mt-4 flex items-center justify-between text-xs text-gray-400">
-        <span>
-          {connected ? "● live updates connected" : "○ polling fallback"}
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              connected ? "bg-green-500" : "bg-amber-400"
+            }`}
+          />
+          {connected ? "live updates connected" : "polling fallback"}
         </span>
         <Link href="/orders" className="font-medium text-brand-600 hover:underline">
           My orders →

@@ -9,10 +9,7 @@ export const Card = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn(
-        "rounded-xl border border-gray-200 bg-white text-gray-900 shadow-sm",
-        className
-      )}
+      className={cn("card-premium text-gray-900", className)}
       {...props}
     />
   )
