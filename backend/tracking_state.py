@@ -7,6 +7,7 @@ both the REST tracking endpoint and the WebSocket simulation so the two views
 can never drift apart.
 """
 
+import math
 import time
 from datetime import datetime, timezone
 from typing import Optional, Tuple
@@ -65,29 +66,47 @@ def live_driver_position(order: Order) -> Optional[Tuple[float, float]]:
 def progress_at_position(order: Order, lat: float, lng: float) -> float:
     """Estimate 0..1 progress from a live GPS fix against the road route.
 
-    Finds the route vertex nearest the fix and returns the fraction of the
-    total route distance travelled up to it (coarse but stable). Falls back
-    to 0.0 when the route has no length (e.g. pickup not yet left).
+    Projects the fix onto the nearest route *segment* (not just the nearest
+    vertex), so successive GPS fixes move the progress smoothly and the ETA
+    never jumps between vertices. Falls back to 0.0 when the route has no
+    length (e.g. the rider has not left the pickup yet).
     """
     route, _ = order_route(order)
-    if not route:
+    if not route or len(route) < 2:
         return 0.0
-    cumulative = []
+    point = (lat, lng)
+
+    cumulative = [0.0]
     acc = 0.0
     for i in range(1, len(route)):
         acc += tracking.haversine_km(route[i - 1], route[i])
         cumulative.append(acc)
-    if not cumulative:
-        return 0.0
-    total = cumulative[-1]
+    total = acc
     if total == 0.0:
         return 0.0
-    best_i = min(
-        range(len(route)),
-        key=lambda i: tracking.haversine_km(route[i], (lat, lng)),
-    )
-    travelled = cumulative[best_i - 1] if best_i > 0 else 0.0
-    return min(1.0, max(0.0, travelled / total))
+
+    best_seg_dist = float("inf")
+    best_cum = 0.0
+    for i in range(len(route) - 1):
+        a, b = route[i], route[i + 1]
+        ab = tracking.haversine_km(a, b)
+        if ab == 0.0:
+            continue
+        ap = tracking.haversine_km(a, point)
+        bp = tracking.haversine_km(point, b)
+        # Projection parameter of P onto segment AB (law of cosines).
+        t = (ap * ap - bp * bp + ab * ab) / (2.0 * ab * ab)
+        t = min(1.0, max(0.0, t))
+        if 0.0 < t < 1.0:
+            height_sq = ap * ap - (t * ab) * (t * ab)
+            seg_dist = math.sqrt(max(0.0, height_sq))
+        else:
+            seg_dist = min(ap, bp)
+        if seg_dist < best_seg_dist:
+            best_seg_dist = seg_dist
+            best_cum = cumulative[i] + t * ab
+
+    return min(1.0, max(0.0, best_cum / total))
 
 
 def rider_progress(

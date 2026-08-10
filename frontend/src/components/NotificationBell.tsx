@@ -124,6 +124,7 @@ export default function NotificationBell() {
             <button
               onClick={() => {
                 setNotifications([]);
+                setUnread(0);
                 notificationApi.markAllRead().catch(() => undefined);
               }}
               className="text-xs font-medium text-brand-600 hover:underline"

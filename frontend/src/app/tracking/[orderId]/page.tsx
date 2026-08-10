@@ -45,15 +45,29 @@ export default function TrackingPage() {
     });
   }, []);
 
-  // Fetch the initial state over REST (also covers the no-WS fallback).
+  // Poll the REST state as an authoritative fallback: it covers the initial
+  // load AND keeps the map live when the WebSocket drops (dev servers close
+  // sockets on hot reload), so the tracking page never freezes.
   useEffect(() => {
-    setError("");
-    trackingApi
-      .state(orderId)
-      .then(applyState)
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : "Failed to load tracking")
-      );
+    let cancelled = false;
+    const poll = () =>
+      trackingApi
+        .state(orderId)
+        .then((s) => {
+          if (!cancelled) applyState(s);
+        })
+        .catch((err) => {
+          if (!cancelled)
+            setError(
+              err instanceof Error ? err.message : "Failed to load tracking"
+            );
+        });
+    poll();
+    const timer = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [orderId, applyState]);
 
   // Fetch the ML prediction + SHAP explanation for the "Why this ETA?" panel.
@@ -65,51 +79,64 @@ export default function TrackingPage() {
       .catch(() => setPrediction(null)); // quietly hide the panel on any error
   }, [orderId, user]);
 
-  // Open the live WebSocket channel for this order.
+  // Open the live WebSocket channel for this order, reconnecting on drops.
   useEffect(() => {
     if (!user) return;
     const token = window.localStorage.getItem("foodai_access_token");
     if (!token) return;
 
-    const ws = new WebSocket(`${WS_URL}/ws/tracking/${orderId}?token=${token}`);
-    wsRef.current = ws;
+    let cancelled = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let ws: WebSocket | null = null;
 
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onerror = () => setConnected(false);
+    const connect = () => {
+      if (cancelled) return;
+      ws = new WebSocket(`${WS_URL}/ws/tracking/${orderId}?token=${token}`);
+      wsRef.current = ws;
 
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === "state") applyState(msg.data);
-        if (msg.type === "position") {
-          setState((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  rider_lat: msg.lat,
-                  rider_lng: msg.lng,
-                  progress: msg.progress,
-                  status: msg.status,
-                }
-              : prev
-          );
+      ws.onopen = () => setConnected(true);
+      ws.onclose = () => {
+        setConnected(false);
+        if (!cancelled) reconnectTimer = setTimeout(connect, 2000);
+      };
+      ws.onerror = () => ws?.close();
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "state") applyState(msg.data);
+          if (msg.type === "position") {
+            setState((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    rider_lat: msg.lat,
+                    rider_lng: msg.lng,
+                    progress: msg.progress,
+                    status: msg.status,
+                  }
+                : prev
+            );
+          }
+          if (msg.type === "delivered") {
+            setState((prev) =>
+              prev
+                ? { ...prev, rider_lat: msg.lat, rider_lng: msg.lng, progress: 1, status: "DELIVERED" }
+                : prev
+            );
+          }
+          if (msg.type === "pong") return;
+        } catch {
+          /* ignore malformed frames */
         }
-        if (msg.type === "delivered") {
-          setState((prev) =>
-            prev
-              ? { ...prev, rider_lat: msg.lat, rider_lng: msg.lng, progress: 1, status: "DELIVERED" }
-              : prev
-          );
-        }
-        if (msg.type === "pong") return;
-      } catch {
-        /* ignore malformed frames */
-      }
+      };
     };
 
+    connect();
     return () => {
-      ws.close();
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
       wsRef.current = null;
     };
   }, [orderId, user, applyState]);
@@ -140,10 +167,11 @@ export default function TrackingPage() {
     );
   }
 
+  const liveSuffix = state.position_source === "live" ? " · live GPS" : "";
   const etaLabel =
     state.eta_min != null
       ? state.eta_source === "ml"
-        ? `~${Math.ceil(state.eta_min)} min (AI)`
+        ? `~${Math.ceil(state.eta_min)} min (AI${liveSuffix})`
         : `~${Math.ceil(state.eta_min)} min`
       : "—";
 
