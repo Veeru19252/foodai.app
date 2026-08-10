@@ -6,7 +6,7 @@
 
 A Swiggy-style food delivery platform with **real-time tracking** and **machine learning** — delivery-time (ETA) prediction and zone-wise demand forecasting.
 
-![Python](https://img.shields.io/badge/Python-3.10-blue) ![Streamlit](https://img.shields.io/badge/Streamlit-UI-red) ![FastAPI](https://img.shields.io/badge/FastAPI-Backend-green) ![XGBoost](https://img.shields.io/badge/XGBoost-ML-orange) ![SQLite](https://img.shields.io/badge/SQLite-DB-lightgrey) ![License](https://img.shields.io/badge/License-MIT-yellow)
+![Python](https://img.shields.io/badge/Python-3.10-blue) ![Streamlit](https://img.shields.io/badge/Streamlit-UI-red) ![FastAPI](https://img.shields.io/badge/FastAPI-Backend-green) ![XGBoost](https:[...]
 
 **Status:** 🚧 In Development · **Team:** 2 People
 
@@ -71,7 +71,7 @@ A Swiggy-style food delivery platform with **real-time tracking** and **machine 
 
 > **Quick demo script:** Login as `customer@foodai.com` → order from "Spice Garden" → watch the delivery partner move live on the map → see the AI-predicted ETA update.
 
-> **Admin demo script:** Login as `admin@foodai.com` / `password123` → Admin Dashboard shows Today Revenue, Total Orders, Active Orders and Avg Order Value metric cards → plotly charts (orders per day, revenue trend, orders per restaurant, top-selling items) → demand heatmap with zone circles colored green (<2) / yellow (2-4) / orange (4-6) / red (>6) by forecast_service predicted orders → recent orders table. The heatmap uses the XGBoost demand model with a moving-average fallback.
+> **Admin demo script:** Login as `admin@foodai.com` / `password123` → Admin Dashboard shows Today Revenue, Total Orders, Active Orders and Avg Order Value metric cards → plotly charts (orders[...]
 
 > **Register:** The login page has a Register tab — create a customer account (name, email, password) and log in immediately.
 
@@ -494,15 +494,11 @@ Runs Alembic migrations automatically; demo data is seeded on first boot.
 
 ### Deploy to Render (one-click, current)
 
-[`render.yaml`](./render.yaml) is a Render Blueprint that provisions the whole
-stack (Postgres 16 + FastAPI + Next.js) from this repo:
+`render.yaml` is a Render Blueprint that provisions the whole stack (Postgres 16 + FastAPI + Next.js) from this repo:
 
-1. Push this repo to GitHub (already done — `main`).
-2. Open [render.com](https://render.com) → **New** → **Blueprint** →
-   connect the `foodai.app` repo.
-3. Render reads `render.yaml`, provisions `foodai-db`,
-   `foodai-backend` and `foodai-frontend`, and auto-deploys on every push to
-   `main`.
+1. Push this repo to GitHub (main).
+2. Open https://render.com → **New** → **Blueprint** → connect the `foodai.app` repo.
+3. Render reads `render.yaml`, provisions the services (default names: `foodai-db`, `foodai-backend`, `foodai-frontend`), and auto-deploys on every push to `main`.
 
 Expected URLs (with the default service names):
 
@@ -513,13 +509,9 @@ Expected URLs (with the default service names):
 
 Notes:
 
-- The backend applies Alembic migrations (`alembic upgrade head`) and seeds the
-  demo accounts on first boot.
-- Free-tier web services spin down after ~15 min idle (first request takes a
-  few seconds to wake up), and free Postgres data expires after 30 days —
-  upgrade the database plan for a persistent demo.
-- If Render assigns different service URLs, update `NEXT_PUBLIC_API_URL` (on
-  the frontend) and `CORS_ORIGINS` (on the backend) accordingly.
+- The backend applies Alembic migrations (`alembic upgrade head`) and seeds demo accounts on first boot.
+- Free-tier web services spin down after ~15 minutes idle (the first request may take a few seconds to wake), and free Postgres instances on free plans may expire — upgrade the database plan for a persistent demo.
+- If Render assigns different service URLs, update `NEXT_PUBLIC_API_URL` (frontend) and `CORS_ORIGINS` (backend) to match the assigned URLs.
 
 ---
 
@@ -537,8 +529,8 @@ Notes:
    ```
 
    **Alternative:** upload the files via the web UI (Files tab → Add file → Upload files).
-4. **Files that MUST be committed:** `app.py`, `database.py`, `seed_data.py`, `tracking.py`, `eta_service.py`, `forecast_service.py`, `explain_service.py`, `requirements.txt`, `.streamlit/config.toml`, `setup.sh`, `models/eta_model.joblib`, `models/forecast_model.joblib`, `models/forecast_meta.json`.
-5. **Note:** `foodai.db` is no longer used — the app now uses a local **MySQL** database (see ⚙️ Configuration; credentials go in the gitignored `.env`). The app auto-creates + seeds the database on first boot (an empty demo DB gets seeded automatically). `outputs/` and `data/` are optional.
+4. **Files that MUST be committed:** `app.py`, `database.py`, `seed_data.py`, `tracking.py`, `eta_service.py`, `forecast_service.py`, `explain_service.py`, `requirements.txt`, `.streamlit/config.[...]
+5. **Note:** `foodai.db` is no longer used — the app now uses a local **MySQL** database (see ⚙️ Configuration; credentials go in the gitignored `.env`). The app auto-creates + seeds the da[...]
 
 ---
 
@@ -615,3 +607,4 @@ Distributed under the **MIT License**. See `LICENSE` for more information.
 - **Kaggle** — free courses + practice datasets
 - **XGBoost paper** (Chen & Guestrin, 2016) — the model we built on
 - **fastapi.tiangolo.com** — excellent FastAPI docs
+
