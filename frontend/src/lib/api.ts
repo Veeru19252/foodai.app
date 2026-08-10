@@ -9,6 +9,7 @@
 import type {
   AdminOverview,
   AdminUser,
+  AppNotification,
   AuthResponse,
   DriverBrief,
   ForecastSeries,
@@ -17,11 +18,16 @@ import type {
   OrderBrief,
   OrderDetail,
   OrderPrediction,
+  PaymentIntent,
+  PaymentStatus,
+  RazorpayVerifyPayload,
+  Receipt,
   Recommendation,
   Restaurant,
   RestaurantOrder,
   Review,
   SavedAddress,
+  SurgeState,
   TrackingState,
 } from "@/lib/types";
 
@@ -242,6 +248,11 @@ export const ordersApi = {
     delivery_lat?: number;
     delivery_lng?: number;
     delivery_address?: string;
+    payment_method?: string;
+    delivery_phone?: string;
+    delivery_city?: string;
+    delivery_state?: string;
+    delivery_pincode?: string;
   }) =>
     api<OrderDetail>("/orders", {
       method: "POST",
@@ -255,11 +266,23 @@ export const ordersApi = {
       delivery_lat?: number;
       delivery_lng?: number;
       delivery_address?: string;
+      scheduled_for?: string;
+      payment_method?: string;
+      delivery_phone?: string;
+      delivery_city?: string;
+      delivery_state?: string;
+      delivery_pincode?: string;
     }[]
   ) =>
     api<{ orders: OrderDetail[] }>("/orders/batch", {
       method: "POST",
       body: JSON.stringify({ orders }),
+    }),
+  surge: () => api<SurgeState>("/orders/surge"),
+  receipt: (orderId: number) => api<Receipt>(`/orders/${orderId}/receipt`),
+  emailReceipt: (orderId: number) =>
+    api<{ emailed: boolean; to: string }>(`/orders/${orderId}/receipt/email`, {
+      method: "POST",
     }),
   cancel: (orderId: number) =>
     api<OrderDetail>(`/orders/${orderId}/cancel`, { method: "POST" }),
@@ -332,13 +355,24 @@ export const ordersApi = {
 };
 
 export const reviewsApi = {
-  create: (orderId: number, rating: number, comment?: string) =>
+  create: (orderId: number, rating: number, comment?: string, photoUrl?: string) =>
     api<Review>("/reviews", {
       method: "POST",
-      body: JSON.stringify({ order_id: orderId, rating, comment: comment || null }),
+      body: JSON.stringify({
+        order_id: orderId,
+        rating,
+        comment: comment || null,
+        photo_url: photoUrl || null,
+      }),
     }),
   forRestaurant: (restaurantId: number) =>
     api<Review[]>(`/reviews/restaurant/${restaurantId}`),
+  myRestaurantReviews: () => api<Review[]>("/reviews/me"),
+  reply: (reviewId: number, reply: string) =>
+    api<Review>(`/reviews/${reviewId}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ reply }),
+    }),
 };
 
 export const addressesApi = {
@@ -359,6 +393,37 @@ export const addressesApi = {
 
 export const trackingApi = {
   state: (orderId: number) => api<TrackingState>(`/tracking/${orderId}`),
+};
+
+export const paymentsApi = {
+  status: (orderId: number) =>
+    api<PaymentStatus>(`/payments/orders/${orderId}`),
+  codConfirm: (orderId: number) =>
+    api<PaymentStatus>(`/payments/orders/${orderId}/cod/confirm`, {
+      method: "POST",
+    }),
+  codCancel: (orderId: number) =>
+    api<PaymentStatus>(`/payments/orders/${orderId}/cod/cancel`, {
+      method: "POST",
+    }),
+  razorpayOrder: (orderId: number) =>
+    api<PaymentIntent>(`/payments/razorpay/order`, {
+      method: "POST",
+      body: JSON.stringify({ order_id: orderId }),
+    }),
+  razorpayVerify: (payload: RazorpayVerifyPayload) =>
+    api<PaymentStatus>(`/payments/razorpay/verify`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+};
+
+export const notificationApi = {
+  list: () => api<{ items: AppNotification[]; unread: number }>("/notifications"),
+  markRead: (id: number) =>
+    api<AppNotification>(`/notifications/${id}/read`, { method: "POST" }),
+  markAllRead: () =>
+    api<{ ok: boolean }>("/notifications/read-all", { method: "POST" }),
 };
 
 export const mlApi = {

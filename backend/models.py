@@ -97,6 +97,10 @@ class Order(Base):
     delivery_city = Column(String(64), nullable=True)
     delivery_state = Column(String(64), nullable=True)
     delivery_pincode = Column(String(10), nullable=True)
+    # Scheduling + surge pricing (Layer 2).
+    scheduled_for = Column(DateTime, nullable=True)
+    delivery_fee = Column(Float, nullable=False, default=0.0)
+    surge_multiplier = Column(Float, nullable=False, default=1.0)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     customer = relationship("User", foreign_keys=[customer_id])
@@ -172,11 +176,29 @@ class Review(Base):
     restaurant_id = Column(Integer, ForeignKey("restaurants.id"), nullable=False)
     rating = Column(Integer, nullable=False)
     comment = Column(Text, nullable=True)
+    photo_url = Column(String(255), nullable=True)
+    owner_reply = Column(Text, nullable=True)
+    replied_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     order = relationship("Order")
     user = relationship("User")
     restaurant = relationship("Restaurant")
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    type = Column(String(32), nullable=False, default="info")
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=True)
+    order_id = Column(Integer, nullable=True)
+    read = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    user = relationship("User")
 
 
 class SavedAddress(Base):

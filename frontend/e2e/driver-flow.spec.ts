@@ -18,6 +18,12 @@ test("driver receives assignment notification and starts delivery", async ({
   await expect(driver).toHaveURL(/\/driver/);
   await expect(driver.getByRole("button", { name: "Notifications" })).toBeVisible();
 
+  // This suite runs against the shared demo database, so notification rows
+  // can leak between runs. Open and close the tray to acknowledge anything
+  // left over, making the badge assertion below exact.
+  await driver.getByRole("button", { name: "Notifications" }).click();
+  await driver.getByRole("button", { name: "Notifications" }).click();
+
   // Customer places an order at Dosa Plaza.
   const customerContext = await browser.newContext();
   const customer = await customerContext.newPage();
@@ -57,7 +63,9 @@ test("driver receives assignment notification and starts delivery", async ({
     timeout: 15_000,
   });
   await driver.getByRole("button", { name: "Notifications" }).click();
-  await expect(driver.getByText(/New delivery assigned for order #/)).toBeVisible();
+  await expect(
+    driver.getByText(new RegExp(`New delivery assigned for order #${orderId}`))
+  ).toBeVisible();
 
   // The driver dashboard lists the delivery with a "Start delivery" action.
   await driver.goto("/driver");

@@ -1,0 +1,23 @@
+{
+  "name": "FoodAI — Food delivery with AI-powered ETAs",
+  "short_name": "FoodAI",
+  "description": "Order from local restaurants and track your delivery live with ML-predicted arrival times.",
+  "start_url": "/restaurants",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#e11d48",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

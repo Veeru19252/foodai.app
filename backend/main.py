@@ -25,7 +25,9 @@ from backend.routers import (
     admin,
     auth,
     ml,
+    notifications,
     orders,
+    payments,
     restaurants,
     reviews,
     tracking,
@@ -82,7 +84,8 @@ app.include_router(ml.router)
 app.include_router(admin.router)
 app.include_router(reviews.router)
 app.include_router(addresses.router)
-app.include_router(addresses.router)
+app.include_router(payments.router)
+app.include_router(notifications.router)
 
 
 @app.get("/api/health")

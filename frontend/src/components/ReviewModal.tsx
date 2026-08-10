@@ -16,6 +16,7 @@ export default function ReviewModal({
 }) {
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");
+  const [photoUrl, setPhotoUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -23,7 +24,12 @@ export default function ReviewModal({
     setBusy(true);
     setError("");
     try {
-      await reviewsApi.create(orderId, rating, comment.trim() || undefined);
+      await reviewsApi.create(
+        orderId,
+        rating,
+        comment.trim() || undefined,
+        photoUrl.trim() || undefined
+      );
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not submit review");
@@ -64,6 +70,14 @@ export default function ReviewModal({
           placeholder="What did you like (or not)?"
           className="mb-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
           rows={3}
+        />
+
+        <input
+          type="url"
+          value={photoUrl}
+          onChange={(e) => setPhotoUrl(e.target.value)}
+          placeholder="Photo URL (optional)"
+          className="mb-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
         />
 
         {error && (

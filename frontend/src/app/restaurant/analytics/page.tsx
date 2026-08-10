@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { restaurantApi, type RestaurantAnalytics } from "@/lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { restaurantApi, reviewsApi, type RestaurantAnalytics } from "@/lib/api";
+import type { Review } from "@/lib/types";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import StatusBadge from "@/components/StatusBadge";
 
 export default function RestaurantAnalyticsPage() {
   const [data, setData] = useState<RestaurantAnalytics | null>(null);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [replies, setReplies] = useState<Record<number, string>>({});
+  const [replyingId, setReplyingId] = useState<number | null>(null);
+  const [replyNote, setReplyNote] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -17,6 +22,34 @@ export default function RestaurantAnalyticsPage() {
         setError(err instanceof Error ? err.message : "Failed to load analytics")
       );
   }, []);
+
+  const loadReviews = useCallback(() => {
+    reviewsApi
+      .myRestaurantReviews()
+      .then(setReviews)
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    loadReviews();
+  }, [loadReviews]);
+
+  async function submitReply(review: Review) {
+    const text = (replies[review.id] ?? "").trim();
+    if (!text) return;
+    setReplyingId(review.id);
+    setReplyNote("");
+    try {
+      await reviewsApi.reply(review.id, text);
+      setReplyNote(`Replied to ${review.user_name}`);
+      setReplies((prev) => ({ ...prev, [review.id]: "" }));
+      loadReviews();
+    } catch (err) {
+      setReplyNote(err instanceof Error ? err.message : "Could not reply");
+    } finally {
+      setReplyingId(null);
+    }
+  }
 
   const maxStatus = data
     ? Math.max(1, ...Object.values(data.orders_by_status))

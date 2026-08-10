@@ -20,10 +20,25 @@ import tracking
 
 from backend.db import get_db
 from backend.models import MenuItem, Order, OrderItem, Restaurant, Review, User
-from backend import security
+from backend import security, simulation
 from backend.tracking_state import delivery_end, order_route
 
 router = APIRouter(prefix="/ml", tags=["ml"])
+
+
+@router.get("/kitchen-load")
+def get_kitchen_load(
+    hour: Optional[int] = Query(None),
+    user: User = Depends(security.get_current_user),
+):
+    """Simulated per-zone kitchen load for an hour (Poisson arrivals).
+
+    Feeds the restaurant/admin dashboards with a realistic "how busy is each
+    kitchen zone right now" number. The underlying distribution comes from
+    backend.simulation.kitchen_load(); the ML forecast endpoint is separate
+    and predicts demand hours ahead — this one is the current snapshot.
+    """
+    return simulation.kitchen_load(hour)
 
 
 def _parse_point(value: Optional[str]) -> Optional[tuple[float, float]]:

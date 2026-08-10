@@ -68,6 +68,9 @@ export default function Navbar() {
               <Link href="/restaurant/offers" className="font-medium hover:text-brand-600">
                 Offers
               </Link>
+              <Link href="/restaurant/reviews" className="font-medium hover:text-brand-600">
+                Reviews
+              </Link>
               <Link href="/restaurant/analytics" className="font-medium hover:text-brand-600">
                 Analytics
               </Link>
@@ -86,7 +89,7 @@ export default function Navbar() {
 
           {user ? (
             <div className="flex items-center gap-3">
-              {user.role !== "customer" && <NotificationBell />}
+              {user && <NotificationBell />}
               <span className="hidden text-gray-500 sm:inline">
                 {user.name} ({user.role})
               </span>

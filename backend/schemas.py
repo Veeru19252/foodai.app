@@ -92,6 +92,13 @@ class CreateOrderRequest(BaseModel):
     delivery_lat: Optional[float] = None
     delivery_lng: Optional[float] = None
     delivery_address: Optional[str] = None
+    # Payment + structured-address fields (Layer 2).
+    payment_method: str = Field(default="COD", max_length=16)
+    delivery_phone: Optional[str] = Field(default=None, max_length=15)
+    delivery_city: Optional[str] = Field(default=None, max_length=64)
+    delivery_state: Optional[str] = Field(default=None, max_length=64)
+    delivery_pincode: Optional[str] = Field(default=None, max_length=10)
+    scheduled_for: Optional[datetime] = None
 
 
 class OrderItemOut(BaseModel):
@@ -110,6 +117,17 @@ class OrderOut(BaseModel):
     coupon_code: Optional[str]
     discount_amount: float
     delivery_address: Optional[str]
+    # Layer 2 additions so every order response carries payment state.
+    payment_method: str
+    payment_status: str
+    delivery_phone: Optional[str] = None
+    delivery_city: Optional[str] = None
+    delivery_state: Optional[str] = None
+    delivery_pincode: Optional[str] = None
+    # Layer 2b: scheduling + surge pricing.
+    scheduled_for: Optional[datetime] = None
+    delivery_fee: float = 0.0
+    surge_multiplier: float = 1.0
     created_at: datetime
     items: List[OrderItemOut] = []
 
@@ -191,6 +209,7 @@ class ReviewCreate(BaseModel):
     order_id: int
     rating: int = Field(ge=1, le=5)
     comment: Optional[str] = None
+    photo_url: Optional[str] = Field(default=None, max_length=255)
 
 
 class ReviewOut(BaseModel):
@@ -199,7 +218,56 @@ class ReviewOut(BaseModel):
     user_name: str
     rating: int
     comment: Optional[str]
+    photo_url: Optional[str] = None
+    owner_reply: Optional[str] = None
+    replied_at: Optional[datetime] = None
     created_at: datetime
+
+
+class ReviewReplyIn(BaseModel):
+    reply: str = Field(min_length=1, max_length=1000)
+
+
+# ---- notifications ----
+
+class NotificationOut(BaseModel):
+    id: int
+    type: str
+    title: str
+    message: Optional[str]
+    order_id: Optional[int]
+    read: bool
+    created_at: datetime
+
+
+class NotificationListOut(BaseModel):
+    items: List[NotificationOut]
+    unread: int
+
+
+# ---- surge + receipts ----
+
+class SurgeResponse(BaseModel):
+    hour: int
+    total_load: int
+    surge_multiplier: float
+    delivery_fee: float
+
+
+class ReceiptResponse(BaseModel):
+    order_id: int
+    restaurant_name: str
+    customer_name: str
+    billed_to: Optional[str]
+    items: List[OrderItemOut]
+    food_total: float
+    discount_amount: float
+    delivery_fee: float
+    surge_multiplier: float
+    grand_total: float
+    payment_method: str
+    payment_status: str
+    placed_at: datetime
 
 
 # ---- addresses ----
@@ -213,3 +281,35 @@ class SavedAddressIn(BaseModel):
 
 class UserRoleUpdate(BaseModel):
     role: str = Field(min_length=1, max_length=32)
+
+
+# ---- payments (Layer 2) ----
+
+class PaymentStatusOut(BaseModel):
+    order_id: int
+    payment_method: str
+    payment_status: str
+    payment_id: Optional[str] = None
+    amount: float
+
+
+class RazorpayCreateRequest(BaseModel):
+    order_id: int
+
+
+class RazorpayVerifyRequest(BaseModel):
+    order_id: int
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+class PaymentIntentResponse(BaseModel):
+    order_id: int
+    amount: float
+    amount_paise: int
+    currency: str = "INR"
+    razorpay_order_id: str
+    key_id: str
+    test_mode: bool
+    notes: dict = {}
