@@ -11,6 +11,9 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import LocationPicker, {
   type DeliveryPoint,
 } from "@/components/LocationPicker";
+import PhoneOtpVerify from "@/components/PhoneOtpVerify";
+import LocationConfirm from "@/components/LocationConfirm";
+import { useAuth } from "@/lib/auth";
 import {
   CITY_CENTERS,
   DELIVERY_CITIES,
@@ -49,6 +52,7 @@ async function simulateRazorpaySignature(orderId: string, paymentId: string): Pr
 
 export default function CheckoutPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const { items, groups, subtotal, clear } = useCart();
   const [promo, setPromo] = useState("");
   const [promoMessage, setPromoMessage] = useState("");
@@ -64,10 +68,17 @@ export default function CheckoutPage() {
   const [scheduleMode, setScheduleMode] = useState<"now" | "later">("now");
   const [scheduledFor, setScheduledFor] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("COD");
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(user?.phone ?? "");
   const [city, setCity] = useState(DEFAULT_CITY);
   const [stateName, setStateName] = useState(STATE_BY_CITY[DEFAULT_CITY] ?? "");
   const [pincode, setPincode] = useState("");
+  // Pre-order verification gate: both must pass before the order is sent.
+  const [otpVerified, setOtpVerified] = useState<{
+    phone: string;
+    otpToken: string;
+  } | null>(null);
+  const [locationConfirmed, setLocationConfirmed] = useState(false);
+  const [gps, setGps] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     ordersApi
@@ -88,6 +99,20 @@ export default function CheckoutPage() {
     if (s.lat != null && s.lng != null) {
       setPoint({ address: s.address, lat: s.lat, lng: s.lng });
     }
+  }
+
+  function handleOtpVerified(verifiedPhone: string, otpToken: string) {
+    setOtpVerified({ phone: verifiedPhone, otpToken });
+    setPhone(verifiedPhone);
+    setError("");
+  }
+
+  function handleLocationConfirm(
+    confirmed: boolean,
+    gpsPoint?: { lat: number; lng: number }
+  ) {
+    setLocationConfirmed(confirmed);
+    setGps(gpsPoint ?? null);
   }
 
   async function saveCurrentAddress() {
@@ -125,6 +150,12 @@ export default function CheckoutPage() {
   async function placeOrder(e: FormEvent) {
     e.preventDefault();
     if (items.length === 0) return;
+    if (!locationConfirmed || !otpVerified) {
+      setError(
+        "Please confirm your delivery location and verify your phone before ordering."
+      );
+      return;
+    }
     setError("");
     setBusy(true);
     try {
@@ -144,10 +175,14 @@ export default function CheckoutPage() {
               ? new Date(scheduledFor).toISOString()
               : undefined,
           payment_method: paymentMethod,
-          delivery_phone: phone.trim() || undefined,
+          delivery_phone: (otpVerified?.phone ?? phone.trim()) || undefined,
           delivery_city: city.trim() || undefined,
           delivery_state: stateName.trim() || undefined,
           delivery_pincode: pincode.trim() || undefined,
+          otp_token: otpVerified?.otpToken,
+          location_confirmed: locationConfirmed,
+          location_confirm_lat: gps?.lat ?? point.lat,
+          location_confirm_lng: gps?.lng ?? point.lng,
         }))
       );
       const order = res.orders[0];
@@ -278,6 +313,22 @@ export default function CheckoutPage() {
               </div>
             </section>
 
+            <LocationConfirm
+              deliveryAddress={address || point.address}
+              deliveryCity={city}
+              deliveryState={stateName}
+              deliveryPincode={pincode}
+              deliveryLat={point.lat}
+              deliveryLng={point.lng}
+              onConfirm={handleLocationConfirm}
+            />
+
+            <PhoneOtpVerify
+              defaultPhone={user?.phone}
+              onVerified={handleOtpVerified}
+              onError={(message) => setError(message)}
+            />
+
             <section className="rounded-2xl border border-line bg-card p-5">
               <h2 className="mb-3 font-semibold">Payment method</h2>
               <PaymentMethodPicker
@@ -295,9 +346,15 @@ export default function CheckoutPage() {
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   maxLength={15}
-                  className="col-span-2 rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
+                  disabled={!!otpVerified}
+                  className="col-span-2 rounded-lg border border-line bg-surface px-3 py-2 text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                   placeholder="Phone (10 digits)"
                 />
+                {otpVerified && (
+                  <p className="col-span-2 -mt-1 text-xs text-emerald-400">
+                    ✓ Verified — {otpVerified.phone}
+                  </p>
+                )}
                 <input
                   type="text"
                   value={city}
@@ -476,11 +533,17 @@ export default function CheckoutPage() {
             <button
               type="submit"
               onClick={placeOrder}
-              disabled={busy || items.length === 0}
+              disabled={
+                busy || items.length === 0 || !locationConfirmed || !otpVerified
+              }
               className="mt-4 w-full rounded-lg bg-brand-600 py-3 font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
             >
               {busy
                 ? "Placing orders…"
+                : !locationConfirmed
+                ? "Confirm delivery location first"
+                : !otpVerified
+                ? "Verify your phone first"
                 : `Place ${groups.length > 1 ? `${groups.length} orders` : "order"} · ₹${grandTotal.toFixed(0)}`}
             </button>
             <p className="mt-2 text-center text-xs text-faint">

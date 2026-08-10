@@ -58,6 +58,31 @@ def create_refresh_token(user_id: int, role: str) -> str:
     )
 
 
+def create_otp_token(phone: str) -> str:
+    """Short-lived proof that a phone number passed OTP verification.
+
+    The token's subject is the verified phone number; the order router checks
+    it matches the order's delivery phone before accepting the order.
+    """
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": phone,
+        "type": "otp",
+        "iat": now,
+        "exp": now + timedelta(minutes=config.OTP_JWT_EXPIRE_MINUTES),
+    }
+    return jwt.encode(payload, config.JWT_SECRET, algorithm=config.JWT_ALGORITHM)
+
+
+def decode_otp_token(token: str) -> Optional[str]:
+    """Return the verified phone number from an OTP JWT, or None if invalid."""
+    payload = decode_token(token)
+    if payload is None or payload.get("type") != "otp":
+        return None
+    phone = payload.get("sub")
+    return phone if isinstance(phone, str) and phone else None
+
+
 def decode_token(token: str) -> Optional[dict]:
     """Decode + validate a JWT; return its payload or None when invalid."""
     try:
@@ -89,6 +114,27 @@ def get_current_user(
     if user is None:
         raise unauthorized
     return user
+
+
+def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> Optional[User]:
+    """Resolve the user when a Bearer token is present; otherwise return None.
+
+    Used by endpoints like OTP verification that work for guests but can
+    personalize behaviour (e.g. stamping the phone) when signed in.
+    """
+    if credentials is None:
+        return None
+    payload = decode_token(credentials.credentials)
+    if payload is None:
+        return None
+    try:
+        user_id = int(payload["sub"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return db.query(User).filter(User.id == user_id).first()
 
 
 def require_roles(*roles: str):

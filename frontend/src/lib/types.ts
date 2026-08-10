@@ -5,6 +5,9 @@ export interface User {
   name: string;
   email: string;
   role: Role;
+  /** Verified mobile number (stamped after the first OTP verification). */
+  phone?: string | null;
+  phone_verified_at?: string | null;
 }
 
 export interface AuthResponse {
@@ -12,6 +15,44 @@ export interface AuthResponse {
   refresh_token: string;
   token_type: string;
   user: User;
+}
+
+// ---- phone OTP (pre-order verification) ------------------------------------
+
+export interface OtpRequestResponse {
+  ok: boolean;
+  expires_in: number;
+  test_mode: boolean;
+  /** Demo-only: the OTP is returned because no SMS provider is wired up. */
+  dev_code?: string | null;
+}
+
+export interface OtpVerifyResponse {
+  ok: boolean;
+  otp_token?: string | null;
+  phone?: string | null;
+  message?: string;
+}
+
+/** Body for a single /orders create (also used inside /orders/batch). */
+export interface CreateOrderPayload {
+  restaurant_id: number;
+  items: { menu_item_id: number; quantity: number }[];
+  coupon_code?: string;
+  delivery_lat?: number;
+  delivery_lng?: number;
+  delivery_address?: string;
+  payment_method?: string;
+  delivery_phone?: string;
+  delivery_city?: string;
+  delivery_state?: string;
+  delivery_pincode?: string;
+  scheduled_for?: string;
+  /** Pre-order gate fields — required before the order is accepted. */
+  otp_token?: string;
+  location_confirmed?: boolean;
+  location_confirm_lat?: number;
+  location_confirm_lng?: number;
 }
 
 export interface Restaurant {
@@ -140,6 +181,11 @@ export interface OrderDetail extends OrderBrief {
   delivery_city?: string | null;
   delivery_state?: string | null;
   delivery_pincode?: string | null;
+  /** Pre-order gate: the phone was OTP-verified and the location confirmed. */
+  phone_verified?: boolean;
+  location_confirmed?: boolean;
+  location_confirm_lat?: number | null;
+  location_confirm_lng?: number | null;
   items: OrderItemOut[];
 }
 

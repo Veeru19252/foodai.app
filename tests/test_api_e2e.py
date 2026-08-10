@@ -6,7 +6,7 @@ role-based access control.
 
 import eta_service
 
-from tests.conftest import login
+from tests.conftest import login, verify_phone
 
 
 def test_health(client):
@@ -79,14 +79,12 @@ def test_create_order_with_promo(client):
     headers = {"Authorization": f"Bearer {token}"}
     resp = client.post(
         "/orders",
-        json={
-            "restaurant_id": 1,
-            "items": [{"menu_item_id": 1, "quantity": 2}, {"menu_item_id": 5, "quantity": 1}],
-            "coupon_code": "WELCOME10",
-            "delivery_address": "5th Block, Koramangala",
-            "delivery_lat": 12.9719,
-            "delivery_lng": 77.6412,
-        },
+        json=_gate(
+            client,
+            restaurant_id=1,
+            items=[{"menu_item_id": 1, "quantity": 2}, {"menu_item_id": 5, "quantity": 1}],
+            coupon_code="WELCOME10",
+        ),
         headers=headers,
     )
     assert resp.status_code == 201
@@ -125,7 +123,11 @@ def test_order_rejects_price_fraud(client):
     token = login(client, "customer@foodai.com")["access_token"]
     resp = client.post(
         "/orders",
-        json={"restaurant_id": 1, "items": [{"menu_item_id": 9999, "quantity": 1}]},
+        json=_gate(
+            client,
+            restaurant_id=1,
+            items=[{"menu_item_id": 9999, "quantity": 1}],
+        ),
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 400
@@ -288,7 +290,7 @@ def test_reorder_order(client):
     headers = {"Authorization": f"Bearer {token}"}
     resp = client.post(
         "/orders",
-        json={"restaurant_id": 1, "items": [{"menu_item_id": 1, "quantity": 2}]},
+        json=_gate(client, restaurant_id=1, items=[{"menu_item_id": 1, "quantity": 2}]),
         headers=headers,
     )
     assert resp.status_code == 201
@@ -388,7 +390,7 @@ def test_auto_assign(client):
     customer_headers = {"Authorization": f"Bearer {customer_token}"}
     resp = client.post(
         "/orders",
-        json={"restaurant_id": 1, "items": [{"menu_item_id": 2, "quantity": 1}]},
+        json=_gate(client, restaurant_id=1, items=[{"menu_item_id": 2, "quantity": 1}]),
         headers=customer_headers,
     )
     order_id = resp.json()["id"]
@@ -425,7 +427,7 @@ def test_order_nudge(client):
     customer_headers = {"Authorization": f"Bearer {customer_token}"}
     resp = client.post(
         "/orders",
-        json={"restaurant_id": 2, "items": [{"menu_item_id": 6, "quantity": 1}]},
+        json=_gate(client, restaurant_id=2, items=[{"menu_item_id": 6, "quantity": 1}]),
         headers=customer_headers,
     )
     order_id = resp.json()["id"]
@@ -587,7 +589,7 @@ def test_tracking_includes_timeline(client):
     headers = {"Authorization": f"Bearer {token}"}
     resp = client.post(
         "/orders",
-        json={"restaurant_id": 2, "items": [{"menu_item_id": 6, "quantity": 1}]},
+        json=_gate(client, restaurant_id=2, items=[{"menu_item_id": 6, "quantity": 1}]),
         headers=headers,
     )
     order_id = resp.json()["id"]
@@ -627,10 +629,32 @@ def _line(menu_item_id, quantity):
     return {"menu_item_id": menu_item_id, "quantity": quantity}
 
 
+def _gate(client, **overrides):
+    """Order payload with the pre-order verification gate satisfied.
+
+    Requests + verifies an OTP for a fresh phone number and returns the base
+    delivery/confirmation fields every order needs. Extra kwargs override.
+    """
+    verified = verify_phone(client)
+    payload = {
+        "delivery_phone": verified["phone"],
+        "otp_token": verified["otp_token"],
+        "location_confirmed": True,
+        "location_confirm_lat": 12.9719,
+        "location_confirm_lng": 77.6412,
+        "delivery_address": "5th Block, Koramangala",
+        "delivery_lat": 12.9719,
+        "delivery_lng": 77.6412,
+    }
+    payload.update(overrides)
+    return payload
+
+
 # ---- Phase 3: batch orders ----
 
 def test_create_batch_order(client):
     headers = _customer_headers(client)
+    gate = _gate(client)
     resp = client.post(
         "/orders/batch",
         json={
@@ -639,16 +663,12 @@ def test_create_batch_order(client):
                     "restaurant_id": 1,
                     "items": [_line(1, 2)],
                     "coupon_code": "WELCOME10",
-                    "delivery_address": "5th Block, Koramangala",
-                    "delivery_lat": 12.9719,
-                    "delivery_lng": 77.6412,
+                    **gate,
                 },
                 {
                     "restaurant_id": 2,
                     "items": [_line(8, 1)],
-                    "delivery_address": "5th Block, Koramangala",
-                    "delivery_lat": 12.9719,
-                    "delivery_lng": 77.6412,
+                    **gate,
                 },
             ]
         },
@@ -669,6 +689,105 @@ def test_batch_order_empty_rejected(client):
         "/orders/batch", json={"orders": []}, headers=_customer_headers(client)
     )
     assert resp.status_code == 422
+
+
+# ---- Phase: phone OTP verification gate ----
+
+def test_otp_request_and_verify(client):
+    token = login(client, "customer@foodai.com")["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    resp = client.post("/auth/otp/request", json={"phone": "9876500001"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["test_mode"] is True
+    code = body["dev_code"]
+    assert len(code) == 6
+
+    resp = client.post(
+        "/auth/otp/verify",
+        json={"phone": "9876500001", "code": code},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    verified = resp.json()
+    assert verified["ok"] is True
+    assert verified["phone"] == "9876500001"
+    assert verified["otp_token"]
+
+    # Verifying stamps the customer's profile so checkout can pre-fill.
+    me = client.get("/auth/me", headers=headers).json()
+    assert me["phone"] == "9876500001"
+    assert me["phone_verified_at"] is not None
+
+
+def test_otp_wrong_code_rejected(client):
+    resp = client.post("/auth/otp/request", json={"phone": "9876500002"})
+    assert resp.status_code == 200
+    code = resp.json()["dev_code"]
+    wrong = "000000" if code != "000000" else "000001"
+    resp = client.post("/auth/otp/verify", json={"phone": "9876500002", "code": wrong})
+    assert resp.status_code == 400
+    assert "attempt" in resp.json()["detail"].lower()
+
+
+def test_otp_rejects_invalid_phone(client):
+    # 10 digits but starts with 1 (not a valid Indian mobile) -> 400.
+    assert client.post("/auth/otp/request", json={"phone": "1234567890"}).status_code == 400
+    # Over-long -> 400.
+    assert client.post("/auth/otp/request", json={"phone": "98765432109"}).status_code == 400
+    # Too short for the schema -> 422.
+    assert client.post("/auth/otp/request", json={"phone": "98765"}).status_code == 422
+
+
+def test_otp_resend_rate_limited(client):
+    resp = client.post("/auth/otp/request", json={"phone": "9876500003"})
+    assert resp.status_code == 200
+    resp = client.post("/auth/otp/request", json={"phone": "9876500003"})
+    assert resp.status_code == 429
+
+
+def test_order_requires_location_confirmation(client):
+    resp = client.post(
+        "/orders",
+        json=_gate(client, restaurant_id=1, items=[_line(1, 1)], location_confirmed=False),
+        headers=_customer_headers(client),
+    )
+    assert resp.status_code == 400
+    assert "location" in resp.json()["detail"].lower()
+
+
+def test_order_requires_otp_token(client):
+    resp = client.post(
+        "/orders",
+        json={
+            "restaurant_id": 1,
+            "items": [_line(1, 1)],
+            "delivery_phone": "9876500004",
+            "location_confirmed": True,
+        },
+        headers=_customer_headers(client),
+    )
+    assert resp.status_code == 400
+    assert "OTP" in resp.json()["detail"]
+
+
+def test_order_rejects_otp_for_other_phone(client):
+    verified = verify_phone(client)
+    resp = client.post(
+        "/orders",
+        json={
+            "restaurant_id": 1,
+            "items": [_line(1, 1)],
+            "delivery_phone": "9876500005",
+            "otp_token": verified["otp_token"],
+            "location_confirmed": True,
+        },
+        headers=_customer_headers(client),
+    )
+    assert resp.status_code == 400
+    assert "OTP" in resp.json()["detail"]
 
 
 # ---- Phase 3: cancel ----
@@ -819,14 +938,12 @@ def test_scheduled_order(client):
     headers = _customer_headers(client)
     resp = client.post(
         "/orders",
-        json={
-            "restaurant_id": 1,
-            "items": [_line(1, 1)],
-            "delivery_address": "5th Block, Koramangala",
-            "delivery_lat": 12.9719,
-            "delivery_lng": 77.6412,
-            "scheduled_for": "2099-01-01T13:00:00",
-        },
+        json=_gate(
+            client,
+            restaurant_id=1,
+            items=[_line(1, 1)],
+            scheduled_for="2099-01-01T13:00:00",
+        ),
         headers=headers,
     )
     assert resp.status_code == 201
@@ -840,11 +957,12 @@ def test_scheduled_order(client):
 def test_scheduled_order_rejects_past(client):
     resp = client.post(
         "/orders",
-        json={
-            "restaurant_id": 1,
-            "items": [_line(1, 1)],
-            "scheduled_for": "2020-01-01T13:00:00",
-        },
+        json=_gate(
+            client,
+            restaurant_id=1,
+            items=[_line(1, 1)],
+            scheduled_for="2020-01-01T13:00:00",
+        ),
         headers=_customer_headers(client),
     )
     assert resp.status_code == 400
@@ -946,7 +1064,7 @@ def test_notifications_flow(client):
     # Placing an order notifies the restaurant owner.
     resp = client.post(
         "/orders",
-        json={"restaurant_id": 1, "items": [_line(1, 1)], "delivery_address": "5th Block"},
+        json=_gate(client, restaurant_id=1, items=[_line(1, 1)]),
         headers=headers,
     )
     assert resp.status_code == 201
@@ -996,7 +1114,7 @@ def test_driver_live_location(client):
     customer_headers = {"Authorization": f"Bearer {customer_token}"}
     resp = client.post(
         "/orders",
-        json={"restaurant_id": 1, "items": [{"menu_item_id": 2, "quantity": 1}]},
+        json=_gate(client, restaurant_id=1, items=[{"menu_item_id": 2, "quantity": 1}]),
         headers=customer_headers,
     )
     order_id = resp.json()["id"]

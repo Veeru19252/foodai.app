@@ -37,6 +37,19 @@ VALID_PAYMENT_METHODS = ("COD", "RAZORPAY")
 VALID_PAYMENT_STATUSES = ("PENDING", "PAID", "FAILED", "REFUNDED")
 
 
+class OtpCode(Base):
+    __tablename__ = "otp_codes"
+
+    id = Column(Integer, primary_key=True)
+    phone = Column(String(15), nullable=False, index=True)
+    code_hash = Column(String(64), nullable=False)
+    purpose = Column(String(32), nullable=False, default="order_verify")
+    expires_at = Column(DateTime, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    used = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -45,6 +58,10 @@ class User(Base):
     email = Column(String(255), nullable=False, unique=True)
     password_hash = Column(String(255), nullable=False)
     role = Column(String(32), nullable=False)
+    # OTP verification: the customer's mobile, stamped the first time they
+    # verify a code at checkout (so returning customers can be pre-filled).
+    phone = Column(String(15), nullable=True)
+    phone_verified_at = Column(DateTime, nullable=True)
 
     restaurants = relationship("Restaurant", back_populates="owner")
     deliveries = relationship("Delivery", back_populates="driver")
@@ -103,6 +120,12 @@ class Order(Base):
     delivery_city = Column(String(64), nullable=True)
     delivery_state = Column(String(64), nullable=True)
     delivery_pincode = Column(String(10), nullable=True)
+    # Pre-order verification gate: the customer verified their phone via OTP
+    # and explicitly confirmed the delivery location before ordering.
+    phone_verified = Column(Boolean, nullable=False, default=False)
+    location_confirmed = Column(Boolean, nullable=False, default=False)
+    location_confirm_lat = Column(Float, nullable=True)
+    location_confirm_lng = Column(Float, nullable=True)
     # Scheduling + surge pricing (Layer 2).
     scheduled_for = Column(DateTime, nullable=True)
     delivery_fee = Column(Float, nullable=False, default=0.0)

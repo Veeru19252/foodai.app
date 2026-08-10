@@ -29,6 +29,33 @@ class TokenResponse(BaseModel):
     user: dict
 
 
+# ---- phone OTP (pre-order verification) ----
+
+class OtpRequest(BaseModel):
+    phone: str = Field(min_length=10, max_length=15)
+
+
+class OtpRequestResponse(BaseModel):
+    ok: bool
+    expires_in: int
+    test_mode: bool
+    # Demo-only: without an SMS provider the code is returned so the flow is
+    # usable end-to-end. Production should send the code and omit this field.
+    dev_code: Optional[str] = None
+
+
+class OtpVerifyRequest(BaseModel):
+    phone: str = Field(min_length=10, max_length=15)
+    code: str = Field(min_length=4, max_length=8)
+
+
+class OtpVerifyResponse(BaseModel):
+    ok: bool
+    otp_token: Optional[str] = None
+    phone: Optional[str] = None
+    message: str = ""
+
+
 # ---- restaurants ----
 
 class MenuItemOut(BaseModel):
@@ -102,6 +129,12 @@ class CreateOrderRequest(BaseModel):
     delivery_state: Optional[str] = Field(default=None, max_length=64)
     delivery_pincode: Optional[str] = Field(default=None, max_length=10)
     scheduled_for: Optional[datetime] = None
+    # Pre-order verification gate: the customer must have verified their phone
+    # via OTP (otp_token) and explicitly confirmed the delivery location.
+    otp_token: Optional[str] = None
+    location_confirmed: bool = False
+    location_confirm_lat: Optional[float] = None
+    location_confirm_lng: Optional[float] = None
 
 
 class OrderItemOut(BaseModel):
@@ -131,6 +164,11 @@ class OrderOut(BaseModel):
     scheduled_for: Optional[datetime] = None
     delivery_fee: float = 0.0
     surge_multiplier: float = 1.0
+    # Pre-order verification gate state (how the order was approved).
+    phone_verified: bool = False
+    location_confirmed: bool = False
+    location_confirm_lat: Optional[float] = None
+    location_confirm_lng: Optional[float] = None
     created_at: datetime
     items: List[OrderItemOut] = []
 

@@ -11,6 +11,7 @@ import type {
   AdminUser,
   AppNotification,
   AuthResponse,
+  CreateOrderPayload,
   DriverBrief,
   ForecastSeries,
   ItemRecommendationResponse,
@@ -18,6 +19,8 @@ import type {
   OrderBrief,
   OrderDetail,
   OrderPrediction,
+  OtpRequestResponse,
+  OtpVerifyResponse,
   PaymentIntent,
   PaymentStatus,
   RazorpayVerifyPayload,
@@ -152,6 +155,16 @@ export const authApi = {
       method: "POST",
       body: JSON.stringify({ name, email, password, role }),
     }),
+  otpRequest: (phone: string) =>
+    api<OtpRequestResponse>("/auth/otp/request", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    }),
+  otpVerify: (phone: string, code: string) =>
+    api<OtpVerifyResponse>("/auth/otp/verify", {
+      method: "POST",
+      body: JSON.stringify({ phone, code }),
+    }),
 };
 
 export const catalogApi = {
@@ -241,39 +254,12 @@ export const restaurantApi = {
 };
 
 export const ordersApi = {
-  create: (payload: {
-    restaurant_id: number;
-    items: { menu_item_id: number; quantity: number }[];
-    coupon_code?: string;
-    delivery_lat?: number;
-    delivery_lng?: number;
-    delivery_address?: string;
-    payment_method?: string;
-    delivery_phone?: string;
-    delivery_city?: string;
-    delivery_state?: string;
-    delivery_pincode?: string;
-  }) =>
+  create: (payload: CreateOrderPayload) =>
     api<OrderDetail>("/orders", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  createBatch: (
-    orders: {
-      restaurant_id: number;
-      items: { menu_item_id: number; quantity: number }[];
-      coupon_code?: string;
-      delivery_lat?: number;
-      delivery_lng?: number;
-      delivery_address?: string;
-      scheduled_for?: string;
-      payment_method?: string;
-      delivery_phone?: string;
-      delivery_city?: string;
-      delivery_state?: string;
-      delivery_pincode?: string;
-    }[]
-  ) =>
+  createBatch: (orders: CreateOrderPayload[]) =>
     api<{ orders: OrderDetail[] }>("/orders/batch", {
       method: "POST",
       body: JSON.stringify({ orders }),

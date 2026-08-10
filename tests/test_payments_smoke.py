@@ -9,7 +9,7 @@ check with the same demo secret the frontend simulates.
 import hashlib
 import hmac
 
-from tests.conftest import login
+from tests.conftest import login, verify_phone
 
 # Matches backend/routers/payments.py RAZORPAY_KEY_SECRET fallback.
 RAZORPAY_KEY_SECRET = "foodai_demo_secret"
@@ -26,6 +26,7 @@ def _razorpay_signature(order_id: str, payment_id: str) -> str:
 
 def _create_order(client, token, payment_method="COD"):
     headers = {"Authorization": f"Bearer {token}"}
+    verified = verify_phone(client, token=token)
     resp = client.post(
         "/orders",
         json={
@@ -35,7 +36,11 @@ def _create_order(client, token, payment_method="COD"):
             "delivery_lat": 12.9719,
             "delivery_lng": 77.6412,
             "payment_method": payment_method,
-            "delivery_phone": "9876543210",
+            "delivery_phone": verified["phone"],
+            "otp_token": verified["otp_token"],
+            "location_confirmed": True,
+            "location_confirm_lat": 12.9719,
+            "location_confirm_lng": 77.6412,
             "delivery_city": "Bengaluru",
             "delivery_state": "Karnataka",
             "delivery_pincode": "560095",
@@ -52,10 +57,13 @@ def test_cod_defaults_to_pending(client):
     assert order["payment_method"] == "COD"
     assert order["payment_status"] == "PENDING"
     # structured delivery address persisted end to end
-    assert order["delivery_phone"] == "9876543210"
+    assert order["delivery_phone"]
+    assert len(order["delivery_phone"]) == 10
     assert order["delivery_city"] == "Bengaluru"
     assert order["delivery_state"] == "Karnataka"
     assert order["delivery_pincode"] == "560095"
+    assert order["location_confirmed"] is True
+    assert order["phone_verified"] is True
 
 
 def test_cod_confirm_and_cancel_flow(client):

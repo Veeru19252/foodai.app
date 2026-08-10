@@ -147,6 +147,10 @@ def _order_detail(order: Order) -> dict:
         "scheduled_for": order.scheduled_for,
         "delivery_fee": round(order.delivery_fee, 2),
         "surge_multiplier": order.surge_multiplier,
+        "phone_verified": order.phone_verified,
+        "location_confirmed": order.location_confirmed,
+        "location_confirm_lat": order.location_confirm_lat,
+        "location_confirm_lng": order.location_confirm_lng,
         "items": [i.dict() for i in items],
     }
 
@@ -324,11 +328,46 @@ def driver_earnings(
     }
 
 
+def _normalize_phone(phone: str) -> str:
+    """Strip separators so a +91 / 0-prefixed number matches its OTP subject."""
+    return "".join(ch for ch in phone if ch.isdigit())[-10:]
+
+
+def _require_pre_order_verification(payload: CreateOrderRequest) -> None:
+    """Enforce the pre-order gate: phone verified via OTP + location confirmed.
+
+    Raises 400 unless the customer presents a valid otp_token whose subject
+    matches the order's delivery phone, and explicitly confirmed the delivery
+    location. Reorder endpoints deliberately skip this (repeat address/phone).
+    """
+    if not payload.location_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail="Please confirm your delivery location before ordering.",
+        )
+
+    delivery_phone = _normalize_phone(payload.delivery_phone or "")
+    if not delivery_phone:
+        raise HTTPException(
+            status_code=400,
+            detail="A delivery phone number is required. Verify it with an OTP first.",
+        )
+
+    verified_phone = security.decode_otp_token(payload.otp_token or "")
+    if verified_phone is None or _normalize_phone(verified_phone) != delivery_phone:
+        raise HTTPException(
+            status_code=400,
+            detail="Please verify your phone number with an OTP before ordering.",
+        )
+
+
 def _create_single_order(db: Session, user: User, payload: CreateOrderRequest) -> Order:
     """Create one order for a restaurant group (shared by single + batch)."""
     restaurant = db.query(Restaurant).filter(Restaurant.id == payload.restaurant_id).first()
     if restaurant is None:
         raise HTTPException(status_code=404, detail="Restaurant not found.")
+
+    _require_pre_order_verification(payload)
 
     # Resolve prices server-side; reject items that aren't on this menu.
     menu_items = {
@@ -380,6 +419,10 @@ def _create_single_order(db: Session, user: User, payload: CreateOrderRequest) -
         delivery_fee=surge["delivery_fee"],
         surge_multiplier=surge["surge_multiplier"],
         status="PLACED",
+        phone_verified=True,
+        location_confirmed=payload.location_confirmed,
+        location_confirm_lat=payload.location_confirm_lat,
+        location_confirm_lng=payload.location_confirm_lng,
     )
     db.add(order)
     db.flush()
@@ -478,6 +521,11 @@ def reorder_order(
         delivery_state=source.delivery_state,
         delivery_pincode=source.delivery_pincode,
         status="PLACED",
+        # Repeat order: the customer already verified this phone + location.
+        phone_verified=True,
+        location_confirmed=True,
+        location_confirm_lat=source.location_confirm_lat,
+        location_confirm_lng=source.location_confirm_lng,
     )
     db.add(order)
     db.flush()

@@ -39,6 +39,14 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
+# Phone OTP verification (pre-order gate). Codes are 6 digits, expire quickly,
+# and are rate-limited per phone. OTP_JWT_EXPIRE_MINUTES bounds how long a
+# verified phone number can be reused to place an order.
+OTP_CODE_EXPIRE_MINUTES = int(os.getenv("OTP_CODE_EXPIRE_MINUTES", "5"))
+OTP_JWT_EXPIRE_MINUTES = int(os.getenv("OTP_JWT_EXPIRE_MINUTES", "15"))
+OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
+OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "60"))
+
 # CORS origins for the dev frontend (Next.js dev server) and the legacy
 # Streamlit app while it still runs during the transition.
 CORS_ORIGINS = os.getenv(

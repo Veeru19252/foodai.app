@@ -53,17 +53,29 @@ test("customer places a multi-restaurant order and sees live tracking", async ({
   await expect(page.getByText("Promo code applied!")).toBeVisible();
   await expect(page.getByText("Promo discount")).toBeVisible();
 
-  // 8. Place the batch order
+  // 8. Pre-order verification gate: confirm the delivery location first
+  await page.getByText("Yes, deliver to this address").click();
+  await expect(page.getByRole("button", { name: "Verify your phone first" })).toBeDisabled();
+
+  // 9. Verify the phone via OTP (demo auto-fills the returned code)
+  const phone = `9${Math.floor(100000000 + Math.random() * 899999999)}`;
+  await page.getByPlaceholder("10-digit mobile number").fill(phone);
+  await page.getByRole("button", { name: "Send OTP" }).click();
+  await expect(page.getByText("Verify & continue")).toBeVisible();
+  await page.getByRole("button", { name: "Verify & continue" }).click();
+
+  // 10. Place the batch order (button unlocks once both gate steps pass)
+  await expect(page.getByRole("button", { name: /Place.*2 orders/ })).toBeEnabled();
   await page.getByRole("button", { name: /Place.*2 orders/ }).click();
   await expect(page).toHaveURL(/\/tracking\/\d+/);
 
-  // 9. Live tracking page renders order info + AI ETA
+  // 11. Live tracking page renders order info + AI ETA
   await expect(page.getByRole("heading", { name: "Live tracking" })).toBeVisible();
   await expect(page.getByText("AI ETA")).toBeVisible();
   await expect(page.getByText(/~?(\d+)/).first()).toBeVisible();
   await expect(page.getByText(/live updates|polling fallback/)).toBeVisible();
 
-  // 10. AI explainability panel breaks down the ETA into factors
+  // 12. AI explainability panel breaks down the ETA into factors
   await page.getByText("Why this ETA?").click();
   await expect(page.getByText(/The model scores/)).toBeVisible();
   // Contribution rows show signed minute impacts (e.g. "+2.3 min" / "−1.1 min")
@@ -74,7 +86,7 @@ test("customer places a multi-restaurant order and sees live tracking", async ({
   expect(orderId).toBeTruthy();
   test.info().annotations.push({ type: "orderId", description: orderId });
 
-  // 11. Both orders appear under "My orders"
+  // 13. Both orders appear under "My orders"
   await page.goto("/orders");
   await expect(page.getByText("Spice Garden").first()).toBeVisible();
   await expect(page.getByText("Dosa Plaza").first()).toBeVisible();

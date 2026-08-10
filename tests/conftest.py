@@ -6,6 +6,7 @@ backend module is imported (backend.config reads the env at import time).
 """
 
 import os
+import random
 
 os.environ["DATABASE_URL"] = (
     "postgresql+psycopg2://foodai:foodai_pass@127.0.0.1:5432/foodai_test"
@@ -54,5 +55,27 @@ def client():
 def login(client: TestClient, email: str, password: str = "password123") -> dict:
     """Log in and return {access_token, refresh_token, user}."""
     resp = client.post("/auth/login", json={"email": email, "password": password})
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def verify_phone(client: TestClient, phone: str = None, token: str = None) -> dict:
+    """Request + verify an OTP and return {phone, otp_token, ...}.
+
+    The demo has no SMS provider, so the code comes back as dev_code on the
+    request response. Uses a fresh random number by default so tests never
+    trip the per-phone resend cooldown (60s).
+    """
+    if phone is None:
+        phone = "9" + "".join(random.choices("0123456789", k=9))
+    resp = client.post("/auth/otp/request", json={"phone": phone})
+    assert resp.status_code == 200, resp.text
+    code = resp.json()["dev_code"]
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    resp = client.post(
+        "/auth/otp/verify",
+        json={"phone": phone, "code": code},
+        headers=headers,
+    )
     assert resp.status_code == 200, resp.text
     return resp.json()

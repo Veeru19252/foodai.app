@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { completeCheckoutGate } from "./helpers";
 
 /**
  * Role-based dashboards: restaurant sees incoming orders and dispatches them;
@@ -17,6 +18,7 @@ test("restaurant dispatches an order and admin sees the dashboard", async ({
   await customer.getByText("Dosa Plaza").first().click();
   await customer.getByRole("button", { name: "ADD" }).first().click();
   await customer.getByRole("link", { name: "View cart →" }).click();
+  await completeCheckoutGate(customer);
   await customer.getByRole("button", { name: /Place.*order/ }).click();
   await expect(customer).toHaveURL(/\/tracking\/\d+/);
   const orderUrl = customer.url();

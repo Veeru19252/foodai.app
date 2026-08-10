@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { completeCheckoutGate } from "./helpers";
 
 /**
  * Driver workflow: a driver is logged in and connected to the notification
@@ -34,6 +35,7 @@ test("driver receives assignment notification and starts delivery", async ({
   await customer.getByText("Dosa Plaza").first().click();
   await customer.getByRole("button", { name: "ADD" }).first().click();
   await customer.getByRole("link", { name: "View cart →" }).click();
+  await completeCheckoutGate(customer);
   await customer.getByRole("button", { name: /Place.*order/ }).click();
   await expect(customer).toHaveURL(/\/tracking\/\d+/);
   const orderUrl = customer.url();
