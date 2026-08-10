@@ -988,3 +988,89 @@ def test_notifications_flow(client):
     resp = client.post("/notifications/read-all", headers=headers)
     assert resp.status_code == 200
     assert client.get("/notifications", headers=headers).json()["unread"] == 0
+
+
+def test_driver_live_location(client):
+    """The assigned driver can report GPS fixes; tracking reflects them live."""
+    customer_token = login(client, "customer@foodai.com")["access_token"]
+    customer_headers = {"Authorization": f"Bearer {customer_token}"}
+    resp = client.post(
+        "/orders",
+        json={"restaurant_id": 1, "items": [{"menu_item_id": 2, "quantity": 1}]},
+        headers=customer_headers,
+    )
+    order_id = resp.json()["id"]
+
+    owner_token = login(client, "spice@foodai.com")["access_token"]
+    owner_headers = {"Authorization": f"Bearer {owner_token}"}
+    driver_token = login(client, "rider@foodai.com")["access_token"]
+    driver_headers = {"Authorization": f"Bearer {driver_token}"}
+
+    resp = client.post(
+        f"/orders/{order_id}/assign",
+        json={"driver_id": 7},  # rider@foodai.com
+        headers=owner_headers,
+    )
+    assert resp.status_code == 200
+
+    # A customer cannot report the driver's location.
+    resp = client.put(
+        f"/orders/{order_id}/driver-location",
+        json={"lat": 12.0, "lng": 77.0},
+        headers=customer_headers,
+    )
+    assert resp.status_code == 403
+
+    # The assigned driver can. The fix should surface on the tracking state.
+    resp = client.put(
+        f"/orders/{order_id}/driver-location",
+        json={"lat": 12.3456, "lng": 77.6543},
+        headers=driver_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert abs(body["driver_lat"] - 12.3456) < 1e-6
+
+    tracking = client.get(f"/tracking/{order_id}", headers=customer_headers).json()
+    assert tracking["position_source"] == "live"
+    assert abs(tracking["rider_lat"] - 12.3456) < 1e-6
+    assert abs(tracking["rider_lng"] - 77.6543) < 1e-6
+
+    # Invalid coordinates are rejected by the schema.
+    resp = client.put(
+        f"/orders/{order_id}/driver-location",
+        json={"lat": 999.0, "lng": 77.0},
+        headers=driver_headers,
+    )
+    assert resp.status_code == 422
+
+
+def test_admin_retrain_forecast(client):
+    """Only admins may retrain; the response carries fresh metrics."""
+    customer_token = login(client, "customer@foodai.com")["access_token"]
+    resp = client.post(
+        "/ml/forecast/retrain",
+        headers={"Authorization": f"Bearer {customer_token}"},
+    )
+    assert resp.status_code == 403
+
+    admin_token = login(client, "admin@foodai.com")["access_token"]
+    resp = client.post(
+        "/ml/forecast/retrain",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["samples"]["corpus"] > 0
+    assert body["samples"]["live"] >= 0
+    assert body["samples"]["total"] == body["samples"]["corpus"] + body["samples"]["live"]
+    assert "xgboost" in body["metrics"]
+    assert body["metrics"]["xgboost"]["mae"] >= 0.0
+    assert body["metrics"]["moving_average"]["mape"] >= 0.0
+
+    # The freshly written model is what the forecast endpoint reads.
+    forecast = client.get("/ml/forecast", headers={"Authorization": f"Bearer {admin_token}"})
+    assert forecast.status_code == 200
+    assert forecast.json()["fallback"] is False

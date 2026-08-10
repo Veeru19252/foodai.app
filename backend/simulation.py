@@ -22,7 +22,11 @@ from typing import Dict, Optional, Set
 
 from backend.db import SessionLocal
 from backend.models import Delivery, Order, TripLog
-from backend.tracking_state import rider_progress
+from backend.tracking_state import (
+    live_driver_position,
+    progress_at_position,
+    rider_progress,
+)
 
 logger = logging.getLogger("foodai.simulation")
 
@@ -128,6 +132,12 @@ def _advance_delivery(db, delivery: Delivery) -> Optional[dict]:
     if order is None or order.status != "OUT_FOR_DELIVERY":
         return None
     progress, rider_pos = rider_progress(order, delivery)
+    # When the driver is sharing live GPS, publish their real position instead
+    # of the simulated rider so the customer marker never jumps backwards.
+    live = live_driver_position(order)
+    if live is not None:
+        rider_pos = live
+        progress = progress_at_position(order, live[0], live[1])
     db.add(TripLog(delivery_id=delivery.id, lat=rider_pos[0], lng=rider_pos[1]))
     delivered = progress >= 1.0
     if delivered:

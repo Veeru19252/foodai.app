@@ -313,3 +313,12 @@ class PaymentIntentResponse(BaseModel):
     key_id: str
     test_mode: bool
     notes: dict = {}
+
+
+# ---- live driver location (Layer 2c) ----
+
+class DriverLocationUpdate(BaseModel):
+    """A driver's current GPS position (lat/lng decimal degrees)."""
+
+    lat: float = Field(ge=-90.0, le=90.0)
+    lng: float = Field(ge=-180.0, le=180.0)

@@ -101,6 +101,11 @@ class Order(Base):
     scheduled_for = Column(DateTime, nullable=True)
     delivery_fee = Column(Float, nullable=False, default=0.0)
     surge_multiplier = Column(Float, nullable=False, default=1.0)
+    # Live GPS reported by the driver's device (Layer 2c). When present and
+    # fresh, tracking shows the real position instead of the simulation.
+    driver_lat = Column(Float, nullable=True)
+    driver_lng = Column(Float, nullable=True)
+    driver_updated_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     customer = relationship("User", foreign_keys=[customer_id])

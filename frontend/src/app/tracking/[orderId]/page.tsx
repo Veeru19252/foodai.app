@@ -158,7 +158,27 @@ export default function TrackingPage() {
             Order #{state.order_id} · {state.restaurant_name}
           </p>
         </div>
-        <StatusBadge status={state.status} />
+        <div className="flex items-center gap-2">
+          {state.status === "OUT_FOR_DELIVERY" && state.position_source && (
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+                state.position_source === "live"
+                  ? "bg-green-50 text-green-700"
+                  : "bg-gray-100 text-gray-500"
+              }`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  state.position_source === "live"
+                    ? "animate-pulse bg-green-500"
+                    : "bg-gray-400"
+                }`}
+              />
+              {state.position_source === "live" ? "LIVE GPS" : "SIMULATED"}
+            </span>
+          )}
+          <StatusBadge status={state.status} />
+        </div>
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">

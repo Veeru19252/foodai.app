@@ -37,6 +37,16 @@ export default function AdminPage() {
     }[]
   >([]);
   const [error, setError] = useState("");
+  const [retrainBusy, setRetrainBusy] = useState(false);
+  const [retrainResult, setRetrainResult] = useState<{
+    samples: { corpus: number; live: number; total: number };
+    metrics: {
+      moving_average: { mae: number; rmse: number; mape: number };
+      xgboost: { mae: number; rmse: number; mape: number };
+    };
+    retrained_at: string;
+  } | null>(null);
+  const [retrainError, setRetrainError] = useState("");
 
   useEffect(() => {
     adminApi
@@ -62,6 +72,27 @@ export default function AdminPage() {
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update role");
+    }
+  }
+
+  async function runRetrain() {
+    setRetrainBusy(true);
+    setRetrainError("");
+    setRetrainResult(null);
+    try {
+      const result = await mlApi.retrainForecast();
+      setRetrainResult(result);
+      // The model changed under the forecast view — refresh it.
+      mlApi
+        .forecastSeries(6)
+        .then(setForecast)
+        .catch(() => undefined);
+    } catch (err) {
+      setRetrainError(
+        err instanceof Error ? err.message : "Retraining failed"
+      );
+    } finally {
+      setRetrainBusy(false);
     }
   }
 
@@ -179,6 +210,68 @@ export default function AdminPage() {
                 Zone {zone}
               </span>
             ))}
+          </div>
+
+          <div className="mt-4 border-t border-gray-100 pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-700">
+                  Retrain demand model
+                </p>
+                <p className="text-xs text-gray-400">
+                  Re-runs the XGBoost training on the historical corpus plus
+                  every live order, then swaps the model the forecast reads.
+                </p>
+              </div>
+              <button
+                onClick={runRetrain}
+                disabled={retrainBusy}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+              >
+                {retrainBusy ? "Training…" : "Retrain model"}
+              </button>
+            </div>
+
+            {retrainError && (
+              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                {retrainError}
+              </p>
+            )}
+
+            {retrainResult && (
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="rounded-xl bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">Samples</p>
+                  <p className="text-sm font-semibold">
+                    {retrainResult.samples.total.toLocaleString()} orders
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    {retrainResult.samples.corpus.toLocaleString()} historical ·{" "}
+                    {retrainResult.samples.live.toLocaleString()} live
+                  </p>
+                </div>
+                <div className="rounded-xl bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">XGBoost MAE</p>
+                  <p className="text-sm font-semibold">
+                    {retrainResult.metrics.xgboost.mae.toFixed(3)}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    baseline (moving avg):{" "}
+                    {retrainResult.metrics.moving_average.mae.toFixed(3)}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">XGBoost MAPE</p>
+                  <p className="text-sm font-semibold">
+                    {(retrainResult.metrics.xgboost.mape * 100).toFixed(1)}%
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    baseline:{" "}
+                    {(retrainResult.metrics.moving_average.mape * 100).toFixed(1)}%
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

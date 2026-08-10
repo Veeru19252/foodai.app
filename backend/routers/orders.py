@@ -33,6 +33,7 @@ from backend.schemas import (
     BatchOrderRequest,
     BatchOrderResponse,
     CreateOrderRequest,
+    DriverLocationUpdate,
     OrderItemOut,
     OrderOut,
     PromoApplyRequest,
@@ -43,7 +44,12 @@ from backend.schemas import (
 )
 from backend.simulation import publish_sync
 from backend.security import get_current_user
-from backend.tracking_state import eta_for_order, order_route, rider_progress
+from backend.tracking_state import (
+    eta_for_order,
+    order_route,
+    progress_at_position,
+    rider_progress,
+)
 from backend.routers.notifications import notify
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -689,6 +695,67 @@ def assign_delivery(
         order.id,
     )
     return {"delivery_id": delivery.id, "message": "Delivery assigned."}
+
+
+@router.put("/{order_id}/driver-location")
+def update_driver_location(
+    order_id: int,
+    payload: DriverLocationUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Report the driver's live GPS position for an order in transit.
+
+    Only the driver assigned to the order (or an admin) may report a fix.
+    The position is timestamped on the order and pushed immediately to the
+    order's tracking channel, so the customer's map marker follows the real
+    scooter instead of the simulator.
+    """
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found.")
+    if user.role != "admin":
+        if user.role != "delivery":
+            raise HTTPException(
+                status_code=403,
+                detail="Only the assigned driver may report a location.",
+            )
+        is_driver = (
+            db.query(Delivery)
+            .filter(Delivery.order_id == order_id, Delivery.driver_id == user.id)
+            .first()
+            is not None
+        )
+        if not is_driver:
+            raise HTTPException(
+                status_code=403, detail="You are not assigned to this order."
+            )
+    order.driver_lat = payload.lat
+    order.driver_lng = payload.lng
+    order.driver_updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(order)
+    publish_sync(
+        simulation.manager,
+        order.id,
+        {
+            "type": "position",
+            "order_id": order.id,
+            "status": order.status,
+            "lat": round(payload.lat, 6),
+            "lng": round(payload.lng, 6),
+            "progress": round(
+                progress_at_position(order, payload.lat, payload.lng), 4
+            ),
+        },
+    )
+    return {
+        "ok": True,
+        "order_id": order.id,
+        "driver_lat": round(payload.lat, 6),
+        "driver_lng": round(payload.lng, 6),
+        "updated_at": order.driver_updated_at,
+    }
 
 
 def _rider_last_position(db: Session, driver_id: int, fallback) -> tuple:

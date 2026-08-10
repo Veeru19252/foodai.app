@@ -347,6 +347,17 @@ export const ordersApi = {
       method: "PATCH",
       body: JSON.stringify({ status }),
     }),
+  updateDriverLocation: (orderId: number, lat: number, lng: number) =>
+    api<{
+      ok: boolean;
+      order_id: number;
+      driver_lat: number;
+      driver_lng: number;
+      updated_at: string;
+    }>(`/orders/${orderId}/driver-location`, {
+      method: "PUT",
+      body: JSON.stringify({ lat, lng }),
+    }),
   validatePromo: (code: string, orderTotal: number) =>
     api<{ ok: boolean; message: string; discount: number }>(
       "/orders/promo/validate",
@@ -436,6 +447,18 @@ export const mlApi = {
     ),
   orderPrediction: (orderId: number) =>
     api<OrderPrediction>(`/ml/order/${orderId}`),
+  retrainForecast: () =>
+    api<{
+      ok: boolean;
+      model_path: string;
+      samples: { corpus: number; live: number; total: number };
+      demand_buckets: number;
+      metrics: {
+        moving_average: { mae: number; rmse: number; mape: number };
+        xgboost: { mae: number; rmse: number; mape: number };
+      };
+      retrained_at: string;
+    }>("/ml/forecast/retrain", { method: "POST" }),
 };
 
 export const adminApi = {

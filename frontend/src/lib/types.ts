@@ -152,6 +152,8 @@ export interface TrackingState {
   progress: number;
   eta_min?: number | null;
   eta_source: string;
+  /** "live" when the driver is sharing GPS, else "simulated". */
+  position_source?: "live" | "simulated";
   created_at?: string | null;
   pickup_time?: string | null;
   delivered_time?: string | null;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ordersApi } from "@/lib/api";
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -205,12 +205,15 @@ export default function DriverPage() {
               )}
 
               {d.order_status === "OUT_FOR_DELIVERY" && (
-                <Link
-                  href={`/tracking/${d.order_id}`}
-                  className="mt-3 inline-block rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700"
-                >
-                  Navigate
-                </Link>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Link
+                    href={`/tracking/${d.order_id}`}
+                    className="inline-block rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700"
+                  >
+                    Navigate
+                  </Link>
+                  <ShareLocationButton orderId={d.order_id} />
+                </div>
               )}
 
               {d.order_status === "DELIVERED" && (
@@ -223,5 +226,91 @@ export default function DriverPage() {
         })}
       </div>
     </ProtectedRoute>
+  );
+}
+
+/** Uploads the browser's GPS fix every few seconds for one in-flight order. */
+function ShareLocationButton({ orderId }: { orderId: number }) {
+  const [active, setActive] = useState(false);
+  const [error, setError] = useState("");
+  const [lastSent, setLastSent] = useState<string | null>(null);
+  const aliveRef = useRef(true);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const sendOnce = useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setError("Geolocation isn't supported by this browser.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        if (!aliveRef.current) return;
+        try {
+          const res = await ordersApi.updateDriverLocation(
+            orderId,
+            pos.coords.latitude,
+            pos.coords.longitude
+          );
+          setLastSent(new Date(res.updated_at).toLocaleTimeString());
+          setError("");
+        } catch (err) {
+          setError(
+            err instanceof Error ? err.message : "Location upload failed"
+          );
+        }
+      },
+      (err) => setError(err.message || "Location unavailable"),
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 5_000 }
+    );
+  }, [orderId]);
+
+  function start() {
+    setError("");
+    aliveRef.current = true;
+    sendOnce();
+    timerRef.current = setInterval(sendOnce, 8000);
+    setActive(true);
+  }
+
+  function stop() {
+    aliveRef.current = false;
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = null;
+    setActive(false);
+  }
+
+  useEffect(
+    () => () => {
+      aliveRef.current = false;
+      if (timerRef.current) clearInterval(timerRef.current);
+    },
+    []
+  );
+
+  return (
+    <div className="flex items-center gap-2">
+      {active ? (
+        <>
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-green-50 px-3 py-1.5 text-sm font-medium text-green-700">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
+            Sharing location{lastSent ? ` · ${lastSent}` : "…"}
+          </span>
+          <button
+            onClick={stop}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+          >
+            Stop
+          </button>
+        </>
+      ) : (
+        <button
+          onClick={start}
+          className="inline-block rounded-lg border border-brand-300 bg-white px-3 py-1.5 text-sm font-semibold text-brand-700 hover:bg-brand-50"
+        >
+          📍 Share live location
+        </button>
+      )}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
   );
 }

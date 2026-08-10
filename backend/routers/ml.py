@@ -41,6 +41,24 @@ def get_kitchen_load(
     return simulation.kitchen_load(hour)
 
 
+@router.post("/forecast/retrain")
+def retrain_forecast(
+    user: User = Depends(security.require_roles("admin")),
+):
+    """Retrain the demand-forecast model from historical data + live orders.
+
+    Admin-only. Runs the same pipeline as ``scripts/train_forecast.py``
+    (reused, not copied) and rewrites the model + schema metadata that every
+    forecast endpoint reads, so a retrain takes effect immediately.
+    """
+    from backend import ml_train
+
+    try:
+        return ml_train.retrain_forecast()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 def _parse_point(value: Optional[str]) -> Optional[tuple[float, float]]:
     if not value:
         return None
