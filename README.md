@@ -494,6 +494,9 @@ Runs Alembic migrations automatically; demo data is seeded on first boot.
 
 ### Deploy to Render (one-click, current)
 
+> **Operational checklist:** see [`DEPLOY.md`](./DEPLOY.md) for the full
+> pre-deploy validation, post-deploy verification, and rollback steps.
+
 [`render.yaml`](./render.yaml) is a Render Blueprint that provisions the whole
 stack (Postgres 16 + FastAPI + Next.js) from this repo:
 
