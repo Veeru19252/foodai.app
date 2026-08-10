@@ -146,6 +146,11 @@ export default function RestaurantsPage() {
               </span>
             </div>
             <p className="text-sm text-gray-500">{r.cuisine}</p>
+            {r.city && (
+              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand-700 ring-1 ring-brand-100">
+                {r.city}
+              </span>
+            )}
             <p className="mt-1 text-xs text-gray-400">{r.address}</p>
             {r.review_count > 0 && (
               <p className="mt-2 text-xs text-gray-500">

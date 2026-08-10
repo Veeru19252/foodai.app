@@ -609,7 +609,7 @@ def test_admin_overview_guarded(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["users"]["admin"] == 1
-    assert body["restaurants"] == 5
+    assert body["restaurants"] == 15
 
 
 def test_unauthenticated_requests_rejected(client):

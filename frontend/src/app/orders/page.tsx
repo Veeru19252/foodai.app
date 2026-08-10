@@ -179,6 +179,7 @@ export default function OrdersPage() {
                     <p className="font-semibold">{o.restaurant_name}</p>
                     <p className="text-xs text-gray-500">
                       #{o.id} · {new Date(o.created_at).toLocaleString()}
+                      {o.delivery_city ? ` · ${o.delivery_city}` : ""}
                     </p>
                   </div>
                   <div className="flex items-center gap-4">

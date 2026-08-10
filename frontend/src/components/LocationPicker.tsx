@@ -8,20 +8,36 @@ export interface DeliveryPoint {
   address: string;
 }
 
-const DEFAULT_CENTER: [number, number] = [12.9719, 77.6412];
+export interface DeliveryPreset {
+  label: string;
+  city: string;
+  address: string;
+  lat: number;
+  lng: number;
+}
 
-/** Leaflet picker: click the map (or choose a preset) to set the delivery point. */
+/** Leaflet picker: pick a city, choose a pan-India preset, or click the map. */
 export default function LocationPicker({
   point,
   onChange,
   presets,
+  cities,
+  city,
+  onCityChange,
+  cityCenters,
 }: {
   point: DeliveryPoint;
   onChange: (point: DeliveryPoint) => void;
-  presets: { label: string; address: string; lat: number; lng: number }[];
+  presets: DeliveryPreset[];
+  cities: string[];
+  city: string;
+  onCityChange: (city: string) => void;
+  cityCenters: Record<string, [number, number]>;
 }) {
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<L.Map | null>(null);
+
+  const cityPresets = presets.filter((p) => p.city === city);
 
   // Initialise the map once (leaflet is imported client-side only).
   useEffect(() => {
@@ -35,9 +51,10 @@ export default function LocationPicker({
       await import("leaflet/dist/leaflet.css");
       if (disposed || !mapRef.current) return;
 
+      const center = cityCenters[city] ?? [point.lat, point.lng];
       leafletMap = L.map(mapRef.current, {
-        center: [point.lat, point.lng],
-        zoom: 13,
+        center,
+        zoom: 12,
       });
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: "&copy; OpenStreetMap contributors",
@@ -68,21 +85,43 @@ export default function LocationPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Pan to the selected point whenever it changes (preset click or map click).
   useEffect(() => {
-    if (!map || !point) return;
+    if (!map) return;
     map.setView([point.lat, point.lng], map.getZoom());
   }, [point, map]);
 
+  // Pan to the city centre when the city chip changes.
+  useEffect(() => {
+    if (!map) return;
+    const center = cityCenters[city];
+    if (center) map.setView(center, 12);
+  }, [city, map, cityCenters]);
+
   return (
     <div>
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        {cities.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => onCityChange(c)}
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+              city === c
+                ? "bg-brand-600 text-white"
+                : "bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50"
+            }`}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
       <div className="mb-3 flex flex-wrap gap-2">
-        {presets.map((p) => (
+        {cityPresets.map((p) => (
           <button
             key={p.label}
             type="button"
-            onClick={() =>
-              onChange({ lat: p.lat, lng: p.lng, address: p.address })
-            }
+            onClick={() => onChange({ lat: p.lat, lng: p.lng, address: p.address })}
             className={`rounded-full px-3 py-1 text-xs font-medium ${
               point.address === p.address
                 ? "bg-brand-600 text-white"
@@ -100,9 +139,3 @@ export default function LocationPicker({
     </div>
   );
 }
-
-export const DEFAULT_POINT: DeliveryPoint = {
-  lat: DEFAULT_CENTER[0],
-  lng: DEFAULT_CENTER[1],
-  address: "MG Road / Indiranagar",
-};

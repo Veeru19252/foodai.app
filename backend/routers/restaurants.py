@@ -54,6 +54,9 @@ def _restaurant_payload(restaurant: Restaurant, summary: dict) -> dict:
         "rating": round(restaurant.rating or 0.0, 2),
         "reviews_rating": review["reviews_rating"],
         "review_count": review["review_count"],
+        "city": restaurant.city,
+        "lat": restaurant.lat,
+        "lng": restaurant.lng,
     }
 
 

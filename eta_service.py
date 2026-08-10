@@ -76,13 +76,15 @@ ZONE_COLUMNS = [f"zone_{letter}" for letter in ZONE_LETTERS]
 FULL_COLUMNS = NUMERIC_COLUMNS + ZONE_COLUMNS
 
 # Zone reference anchors keyed by letter; a customer point maps to the letter
-# whose anchor is nearest (used to one-hot encode the zone block).
+# whose anchor is nearest (used to one-hot encode the zone block). Anchored to
+# five major metros so any pan-India delivery point snaps to a zone; the model
+# schema stays a fixed 5 one-hot columns (A-E).
 ZONE_ANCHORS = {
-    "A": (12.975, 77.606),
-    "B": (12.982, 77.619),
-    "C": (12.977, 77.596),
-    "D": (13.004, 77.610),
-    "E": (12.970, 77.750),
+    "A": (28.6139, 77.2090),  # New Delhi
+    "B": (19.0760, 72.8777),  # Mumbai
+    "C": (12.9716, 77.5946),  # Bengaluru
+    "D": (17.3850, 78.4867),  # Hyderabad
+    "E": (13.0827, 80.2707),  # Chennai
 }
 
 # --- Model loading ---------------------------------------------------------

@@ -48,6 +48,7 @@ from backend.tracking_state import (
     eta_for_order,
     order_route,
     progress_at_position,
+    restaurant_start,
     rider_progress,
 )
 from backend.routers.notifications import notify
@@ -119,6 +120,7 @@ def _order_brief(order: Order) -> dict:
         "created_at": order.created_at,
         "scheduled_for": order.scheduled_for,
         "delivery_address": order.delivery_address,
+        "delivery_city": order.delivery_city,
         "payment_method": order.payment_method,
         "payment_status": order.payment_status,
     }
@@ -813,10 +815,7 @@ def auto_assign_delivery(
     if not drivers:
         raise HTTPException(status_code=400, detail="No riders available.")
 
-    try:
-        restaurant_pos = tracking.restaurant_coordinates(order.restaurant_id)
-    except ValueError:
-        restaurant_pos = tracking.DEFAULT_CUSTOMER_HOME
+    restaurant_pos = restaurant_start(order)
 
     best = None
     for driver in drivers:

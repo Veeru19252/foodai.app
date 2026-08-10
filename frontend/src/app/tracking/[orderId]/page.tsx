@@ -184,6 +184,7 @@ export default function TrackingPage() {
           <h1 className="text-2xl font-bold tracking-tight">Live tracking</h1>
           <p className="text-sm text-gray-500">
             Order #{state.order_id} · {state.restaurant_name}
+            {state.restaurant_city ? ` · ${state.restaurant_city}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -245,6 +246,11 @@ export default function TrackingPage() {
             <p className="truncate text-sm font-semibold">
               {state.delivery_address ?? "—"}
             </p>
+            {state.delivery_city && (
+              <p className="truncate text-xs text-gray-500">
+                {state.delivery_city}
+              </p>
+            )}
           </div>
         </div>
       </div>

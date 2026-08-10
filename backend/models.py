@@ -59,6 +59,12 @@ class Restaurant(Base):
     address = Column(String(255), nullable=False)
     cuisine = Column(String(128), nullable=False)
     rating = Column(Float, default=0.0)
+    # Pan-India rollout: city + lat/lng keep restaurants across the country
+    # positioned on the map and labelled with their city (nullable for
+    # backward-compatible legacy rows; seed/backfill populates them).
+    city = Column(String(64), nullable=True)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
 
     owner = relationship("User", back_populates="restaurants")
     menu_items = relationship("MenuItem", back_populates="restaurant")

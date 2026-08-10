@@ -9,9 +9,17 @@ import { useCart } from "@/lib/cart";
 import type { SavedAddress } from "@/lib/types";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import LocationPicker, {
-  DEFAULT_POINT,
   type DeliveryPoint,
 } from "@/components/LocationPicker";
+import {
+  CITY_CENTERS,
+  DELIVERY_CITIES,
+  DELIVERY_PRESETS,
+  DEFAULT_CITY,
+  DEFAULT_POINT,
+  STATE_BY_CITY,
+  presetByLabel,
+} from "@/lib/deliveryPresets";
 import {
   PaymentMethodPicker,
   type PaymentMethod,
@@ -39,14 +47,6 @@ async function simulateRazorpaySignature(orderId: string, paymentId: string): Pr
     .join("");
 }
 
-const DELIVERY_PRESETS = [
-  { label: "MG Road / Indiranagar", address: "Hostel Block C, MG Road", lat: 12.9719, lng: 77.6412 },
-  { label: "Koramangala", address: "5th Block, Koramangala", lat: 12.9352, lng: 77.6245 },
-  { label: "HSR Layout", address: "Sector 1, HSR Layout", lat: 12.9116, lng: 77.6387 },
-  { label: "Whitefield", address: "ITPL Main Road, Whitefield", lat: 12.9698, lng: 77.75 },
-  { label: "City Center", address: "MG Road Metro, City Center", lat: 12.977, lng: 77.596 },
-];
-
 export default function CheckoutPage() {
   const router = useRouter();
   const { items, groups, subtotal, clear } = useCart();
@@ -65,8 +65,8 @@ export default function CheckoutPage() {
   const [scheduledFor, setScheduledFor] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("COD");
   const [phone, setPhone] = useState("");
-  const [city, setCity] = useState("");
-  const [stateName, setStateName] = useState("");
+  const [city, setCity] = useState(DEFAULT_CITY);
+  const [stateName, setStateName] = useState(STATE_BY_CITY[DEFAULT_CITY] ?? "");
   const [pincode, setPincode] = useState("");
 
   useEffect(() => {
@@ -218,8 +218,27 @@ export default function CheckoutPage() {
                   if (!address.trim() || address === DEFAULT_POINT.address) {
                     setAddress(p.address);
                   }
+                  const preset = presetByLabel(p.address);
+                  if (preset) {
+                    setCity(preset.city);
+                    setStateName(STATE_BY_CITY[preset.city] ?? "");
+                  }
                 }}
                 presets={DELIVERY_PRESETS}
+                cities={DELIVERY_CITIES}
+                city={city}
+                onCityChange={(c) => {
+                  setCity(c);
+                  setStateName(STATE_BY_CITY[c] ?? "");
+                  const first = DELIVERY_PRESETS.find((p) => p.city === c);
+                  if (first) {
+                    setPoint({ lat: first.lat, lng: first.lng, address: first.address });
+                    if (!address.trim() || address === DEFAULT_POINT.address) {
+                      setAddress(first.address);
+                    }
+                  }
+                }}
+                cityCenters={CITY_CENTERS}
               />
               <div className="mt-3 border-t border-gray-100 pt-3">
                 <p className="mb-2 text-sm font-medium">Saved addresses</p>

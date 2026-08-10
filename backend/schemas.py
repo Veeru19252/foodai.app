@@ -44,6 +44,9 @@ class RestaurantOut(BaseModel):
     address: str
     cuisine: str
     rating: float
+    city: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     menu: List[MenuItemOut] = []
 
 

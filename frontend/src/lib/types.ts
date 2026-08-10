@@ -22,6 +22,9 @@ export interface Restaurant {
   rating: number;
   review_count: number;
   reviews_rating: number;
+  city?: string | null;
+  lat?: number | null;
+  lng?: number | null;
 }
 
 export interface MenuItem {
@@ -100,6 +103,7 @@ export interface OrderBrief {
   total: number;
   created_at: string;
   delivery_address?: string | null;
+  delivery_city?: string | null;
   scheduled_for?: string | null;
   // Layer 4: payment info is returned on every order (list + detail).
   payment_method?: string;
@@ -143,8 +147,10 @@ export interface TrackingState {
   order_id: number;
   status: string;
   restaurant_name: string;
+  restaurant_city?: string | null;
   customer_name: string;
   delivery_address?: string | null;
+  delivery_city?: string | null;
   route: number[][];
   route_distance_km: number;
   rider_lat: number;

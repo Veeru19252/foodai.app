@@ -33,6 +33,7 @@ import train_forecast as trainer  # noqa: E402
 
 from backend.db import SessionLocal  # noqa: E402
 from backend.models import Order  # noqa: E402
+from backend.tracking_state import restaurant_start  # noqa: E402
 
 
 def _zone_for_order(order) -> Optional[str]:
@@ -41,9 +42,7 @@ def _zone_for_order(order) -> Optional[str]:
     if order.delivery_lat is not None and order.delivery_lng is not None:
         return eta_service.nearest_zone(order.delivery_lat, order.delivery_lng)
     try:
-        import tracking
-
-        lat, lng = tracking.restaurant_coordinates(order.restaurant_id)
+        lat, lng = restaurant_start(order)
         return eta_service.nearest_zone(lat, lng)
     except ValueError:
         return None

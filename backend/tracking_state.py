@@ -26,6 +26,23 @@ def delivery_end(order: Order) -> Tuple[float, float]:
     return tracking.DEFAULT_CUSTOMER_HOME
 
 
+def restaurant_start(order: Order) -> Tuple[float, float]:
+    """Return the restaurant's coordinates for an order.
+
+    Prefers the pan-India location columns on the restaurant row (populated by
+    seed/backfill); falls back to the pure tracking.COORDINATES dict, then the
+    demo home. ``order.restaurant`` is a lazy relationship so this works even
+    when only the order was loaded.
+    """
+    restaurant = getattr(order, "restaurant", None)
+    if restaurant is not None and restaurant.lat is not None and restaurant.lng is not None:
+        return (restaurant.lat, restaurant.lng)
+    try:
+        return tracking.restaurant_coordinates(order.restaurant_id)
+    except ValueError:
+        return tracking.DEFAULT_CUSTOMER_HOME
+
+
 def order_route(order: Order):
     """Return (route, distance_km) along real roads for an order.
 
@@ -33,10 +50,7 @@ def order_route(order: Order):
     distance (or haversine fallback). Cached per start/end pair. Restaurants
     created at runtime (no legacy coordinate) fall back to the demo home.
     """
-    try:
-        start = tracking.restaurant_coordinates(order.restaurant_id)
-    except ValueError:
-        start = tracking.DEFAULT_CUSTOMER_HOME
+    start = restaurant_start(order)
     end = delivery_end(order)
     return routing.get_route(start, end)
 
@@ -118,7 +132,7 @@ def rider_progress(
     progress is elapsed time over the trip estimate, walking the road route so
     the marker makes real turns.
     """
-    start = tracking.restaurant_coordinates(order.restaurant_id)
+    start = restaurant_start(order)
     if delivery is None or delivery.pickup_time is None:
         return 0.0, start
     route, _ = order_route(order)
@@ -158,8 +172,10 @@ def build_tracking_state(order: Order, delivery: Optional[Delivery]) -> dict:
         "status": order.status,
         "restaurant_id": order.restaurant_id,
         "restaurant_name": order.restaurant.name if order.restaurant else "",
+        "restaurant_city": order.restaurant.city if order.restaurant else None,
         "customer_name": order.customer.name if order.customer else "",
         "delivery_address": order.delivery_address,
+        "delivery_city": order.delivery_city,
         "created_at": order.created_at,
         "pickup_time": delivery.pickup_time if delivery else None,
         "delivered_time": delivery.delivered_time if delivery else None,
