@@ -45,15 +45,29 @@ export default function TrackingPage() {
     });
   }, []);
 
-  // Fetch the initial state over REST (also covers the no-WS fallback).
+  // Poll the REST state as an authoritative fallback: it covers the initial
+  // load AND keeps the map live when the WebSocket drops (dev servers close
+  // sockets on hot reload), so the tracking page never freezes.
   useEffect(() => {
-    setError("");
-    trackingApi
-      .state(orderId)
-      .then(applyState)
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : "Failed to load tracking")
-      );
+    let cancelled = false;
+    const poll = () =>
+      trackingApi
+        .state(orderId)
+        .then((s) => {
+          if (!cancelled) applyState(s);
+        })
+        .catch((err) => {
+          if (!cancelled)
+            setError(
+              err instanceof Error ? err.message : "Failed to load tracking"
+            );
+        });
+    poll();
+    const timer = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [orderId, applyState]);
 
   // Fetch the ML prediction + SHAP explanation for the "Why this ETA?" panel.
@@ -65,51 +79,64 @@ export default function TrackingPage() {
       .catch(() => setPrediction(null)); // quietly hide the panel on any error
   }, [orderId, user]);
 
-  // Open the live WebSocket channel for this order.
+  // Open the live WebSocket channel for this order, reconnecting on drops.
   useEffect(() => {
     if (!user) return;
     const token = window.localStorage.getItem("foodai_access_token");
     if (!token) return;
 
-    const ws = new WebSocket(`${WS_URL}/ws/tracking/${orderId}?token=${token}`);
-    wsRef.current = ws;
+    let cancelled = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let ws: WebSocket | null = null;
 
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onerror = () => setConnected(false);
+    const connect = () => {
+      if (cancelled) return;
+      ws = new WebSocket(`${WS_URL}/ws/tracking/${orderId}?token=${token}`);
+      wsRef.current = ws;
 
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === "state") applyState(msg.data);
-        if (msg.type === "position") {
-          setState((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  rider_lat: msg.lat,
-                  rider_lng: msg.lng,
-                  progress: msg.progress,
-                  status: msg.status,
-                }
-              : prev
-          );
+      ws.onopen = () => setConnected(true);
+      ws.onclose = () => {
+        setConnected(false);
+        if (!cancelled) reconnectTimer = setTimeout(connect, 2000);
+      };
+      ws.onerror = () => ws?.close();
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "state") applyState(msg.data);
+          if (msg.type === "position") {
+            setState((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    rider_lat: msg.lat,
+                    rider_lng: msg.lng,
+                    progress: msg.progress,
+                    status: msg.status,
+                  }
+                : prev
+            );
+          }
+          if (msg.type === "delivered") {
+            setState((prev) =>
+              prev
+                ? { ...prev, rider_lat: msg.lat, rider_lng: msg.lng, progress: 1, status: "DELIVERED" }
+                : prev
+            );
+          }
+          if (msg.type === "pong") return;
+        } catch {
+          /* ignore malformed frames */
         }
-        if (msg.type === "delivered") {
-          setState((prev) =>
-            prev
-              ? { ...prev, rider_lat: msg.lat, rider_lng: msg.lng, progress: 1, status: "DELIVERED" }
-              : prev
-          );
-        }
-        if (msg.type === "pong") return;
-      } catch {
-        /* ignore malformed frames */
-      }
+      };
     };
 
+    connect();
     return () => {
-      ws.close();
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
       wsRef.current = null;
     };
   }, [orderId, user, applyState]);
@@ -140,10 +167,11 @@ export default function TrackingPage() {
     );
   }
 
+  const liveSuffix = state.position_source === "live" ? " · live GPS" : "";
   const etaLabel =
     state.eta_min != null
       ? state.eta_source === "ml"
-        ? `~${Math.ceil(state.eta_min)} min (AI)`
+        ? `~${Math.ceil(state.eta_min)} min (AI${liveSuffix})`
         : `~${Math.ceil(state.eta_min)} min`
       : "—";
 
@@ -153,28 +181,77 @@ export default function TrackingPage() {
     <ProtectedRoute>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Live tracking</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Live tracking</h1>
           <p className="text-sm text-gray-500">
             Order #{state.order_id} · {state.restaurant_name}
+            {state.restaurant_city ? ` · ${state.restaurant_city}` : ""}
           </p>
         </div>
-        <StatusBadge status={state.status} />
+        <div className="flex items-center gap-2">
+          {state.status === "OUT_FOR_DELIVERY" && state.position_source && (
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+                state.position_source === "live"
+                  ? "bg-green-50 text-green-700"
+                  : "bg-gray-100 text-gray-500"
+              }`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  state.position_source === "live"
+                    ? "animate-pulse bg-green-500"
+                    : "bg-gray-400"
+                }`}
+              />
+              {state.position_source === "live" ? "LIVE GPS" : "SIMULATED"}
+            </span>
+          )}
+          <StatusBadge status={state.status} />
+        </div>
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-2xl border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500">AI ETA</p>
-          <p className="text-2xl font-bold">{etaLabel}</p>
+        <div className="card-premium flex items-center gap-3 p-4">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-lg">
+            🕒
+          </span>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+              AI ETA
+            </p>
+            <p className="text-xl font-bold tracking-tight">{etaLabel}</p>
+          </div>
         </div>
-        <div className="rounded-2xl border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500">Distance</p>
-          <p className="text-2xl font-bold">{state.route_distance_km} km</p>
+        <div className="card-premium flex items-center gap-3 p-4">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-lg">
+            📏
+          </span>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+              Distance
+            </p>
+            <p className="text-xl font-bold tracking-tight">
+              {state.route_distance_km} km
+            </p>
+          </div>
         </div>
-        <div className="rounded-2xl border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500">Delivery to</p>
-          <p className="truncate text-sm font-medium">
-            {state.delivery_address ?? "—"}
-          </p>
+        <div className="card-premium flex items-center gap-3 p-4">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gray-100 text-lg">
+            📍
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+              Delivery to
+            </p>
+            <p className="truncate text-sm font-semibold">
+              {state.delivery_address ?? "—"}
+            </p>
+            {state.delivery_city && (
+              <p className="truncate text-xs text-gray-500">
+                {state.delivery_city}
+              </p>
+            )}
+          </div>
         </div>
       </div>
 
@@ -206,10 +283,13 @@ export default function TrackingPage() {
         </div>
       )}
 
-      <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-gray-200">
+      <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-gray-200/80">
         <div
-          className="h-full rounded-full bg-brand-600 transition-all"
-          style={{ width: `${progressPct}%` }}
+          className="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-600 shadow-[0_0_8px_rgba(234,88,12,0.5)]"
+          style={{
+            width: `${progressPct}%`,
+            transition: "width 700ms cubic-bezier(0.23, 1, 0.32, 1)",
+          }}
         />
       </div>
       <p className="mb-4 text-sm text-gray-500">
@@ -223,8 +303,13 @@ export default function TrackingPage() {
       <TrackingMap route={state.route} riderLat={state.rider_lat} riderLng={state.rider_lng} />
 
       <div className="mt-4 flex items-center justify-between text-xs text-gray-400">
-        <span>
-          {connected ? "● live updates connected" : "○ polling fallback"}
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              connected ? "bg-green-500" : "bg-amber-400"
+            }`}
+          />
+          {connected ? "live updates connected" : "polling fallback"}
         </span>
         <Link href="/orders" className="font-medium text-brand-600 hover:underline">
           My orders →

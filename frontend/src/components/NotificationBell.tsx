@@ -2,70 +2,108 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { notificationApi } from "@/lib/api";
+import type { AppNotification } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
 import { WS_URL } from "@/lib/api";
 
-interface Notification {
-  id: number;
-  message: string;
-  orderId?: number;
-  restaurantName?: string;
-  customerName?: string;
-  type: string;
-}
-
-let nextId = 1;
-
 export default function NotificationBell() {
   const { user, token: accessToken } = useAuth();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const [connected, setConnected] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
 
+  // Load persisted notifications once so the badge survives reloads.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const poll = () =>
+      notificationApi
+        .list()
+        .then((res) => {
+          if (cancelled) return;
+          setNotifications(res.items);
+          setUnread(res.unread);
+        })
+        .catch(() => undefined);
+    poll();
+    // The WebSocket gives instant delivery; polling keeps the badge
+    // authoritative even if the socket briefly drops (e.g. dev hot reload).
+    const timer = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [user]);
+
   useEffect(() => {
     if (!user || !accessToken) return;
-    const ws = new WebSocket(
-      `${WS_URL}/ws/notifications?token=${encodeURIComponent(accessToken)}`
-    );
-    socketRef.current = ws;
+    let cancelled = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let ws: WebSocket | null = null;
 
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onerror = () => setConnected(false);
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "connected") return;
-        if (data.type === "delivery_assigned") {
-          setNotifications((prev) => [
-            {
-              id: nextId++,
-              message: data.message ?? "New delivery assigned",
-              orderId: data.order_id,
-              restaurantName: data.restaurant_name,
-              customerName: data.customer_name,
-              type: data.type,
-            },
-            ...prev,
-          ]);
+    const connect = () => {
+      if (cancelled) return;
+      ws = new WebSocket(
+        `${WS_URL}/ws/notifications?token=${encodeURIComponent(accessToken)}`
+      );
+      socketRef.current = ws;
+
+      ws.onopen = () => setConnected(true);
+      ws.onclose = () => {
+        setConnected(false);
+        if (!cancelled) {
+          reconnectTimer = setTimeout(connect, 2000);
         }
-      } catch {
-        /* ignore malformed frames */
-      }
+      };
+      ws.onerror = () => ws?.close();
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "connected") return;
+          const message: AppNotification = {
+            id: Date.now(),
+            type: data.type ?? "info",
+            title: data.title ?? "Notification",
+            message: data.message ?? "",
+            order_id: data.order_id ?? null,
+            read: false,
+            created_at: new Date().toISOString(),
+          };
+          setNotifications((prev) => [message, ...prev]);
+          setUnread((n) => n + 1);
+        } catch {
+          /* ignore malformed frames */
+        }
+      };
     };
+
+    connect();
     return () => {
-      ws.close();
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
       socketRef.current = null;
     };
   }, [user, accessToken]);
 
-  const unread = notifications.length;
+  async function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (next && unread > 0) {
+      // Opening the tray acknowledges everything.
+      setUnread(0);
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      notificationApi.markAllRead().catch(() => undefined);
+    }
+  }
 
   return (
     <div className="relative">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         aria-label="Notifications"
         className={`relative grid h-9 w-9 place-items-center rounded-full transition ${
           connected ? "bg-brand-50 text-brand-600" : "bg-gray-100 text-gray-500"
@@ -74,7 +112,7 @@ export default function NotificationBell() {
         🔔
         {unread > 0 && (
           <span className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-            {unread}
+            {unread > 9 ? "9+" : unread}
           </span>
         )}
       </button>
@@ -83,14 +121,16 @@ export default function NotificationBell() {
         <div className="absolute right-0 top-11 z-50 w-80 rounded-2xl border border-gray-200 bg-white shadow-xl">
           <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
             <p className="font-semibold">Notifications</p>
-            {unread > 0 && (
-              <button
-                onClick={() => setNotifications([])}
-                className="text-xs font-medium text-brand-600 hover:underline"
-              >
-                Clear all
-              </button>
-            )}
+            <button
+              onClick={() => {
+                setNotifications([]);
+                setUnread(0);
+                notificationApi.markAllRead().catch(() => undefined);
+              }}
+              className="text-xs font-medium text-brand-600 hover:underline"
+            >
+              Clear all
+            </button>
           </div>
           {notifications.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-gray-400">
@@ -99,14 +139,14 @@ export default function NotificationBell() {
           ) : (
             <ul className="max-h-72 divide-y divide-gray-100 overflow-y-auto">
               {notifications.map((n) => (
-                <li key={n.id} className="px-4 py-3 text-sm">
-                  <p className="font-medium">{n.message}</p>
-                  {n.restaurantName && (
-                    <p className="text-xs text-gray-500">{n.restaurantName}</p>
-                  )}
-                  {n.orderId && (
+                <li
+                  key={n.id}
+                  className={`px-4 py-3 text-sm ${n.read ? "" : "bg-brand-50/40"}`}
+                >
+                  <p className="font-medium">{n.message || n.title}</p>
+                  {n.order_id && (
                     <Link
-                      href={`/tracking/${n.orderId}`}
+                      href={`/tracking/${n.order_id}`}
                       onClick={() => setOpen(false)}
                       className="mt-1 inline-block text-xs font-semibold text-brand-600 hover:underline"
                     >

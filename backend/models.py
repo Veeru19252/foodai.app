@@ -33,6 +33,8 @@ VALID_ORDER_STATUSES = (
     "DELIVERED",
     "CANCELLED",
 )
+VALID_PAYMENT_METHODS = ("COD", "RAZORPAY")
+VALID_PAYMENT_STATUSES = ("PENDING", "PAID", "FAILED", "REFUNDED")
 
 
 class User(Base):
@@ -57,6 +59,12 @@ class Restaurant(Base):
     address = Column(String(255), nullable=False)
     cuisine = Column(String(128), nullable=False)
     rating = Column(Float, default=0.0)
+    # Pan-India rollout: city + lat/lng keep restaurants across the country
+    # positioned on the map and labelled with their city (nullable for
+    # backward-compatible legacy rows; seed/backfill populates them).
+    city = Column(String(64), nullable=True)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
 
     owner = relationship("User", back_populates="restaurants")
     menu_items = relationship("MenuItem", back_populates="restaurant")
@@ -85,9 +93,25 @@ class Order(Base):
     total = Column(Float, nullable=False, default=0.0)
     coupon_code = Column(String(255), nullable=True)
     discount_amount = Column(Float, nullable=False, default=0.0)
+    payment_method = Column(String(16), nullable=False, default="COD")
+    payment_status = Column(String(16), nullable=False, default="PENDING")
+    payment_id = Column(String(64), nullable=True)
     delivery_lat = Column(Float, nullable=True)
     delivery_lng = Column(Float, nullable=True)
     delivery_address = Column(String(255), nullable=True)
+    delivery_phone = Column(String(15), nullable=True)
+    delivery_city = Column(String(64), nullable=True)
+    delivery_state = Column(String(64), nullable=True)
+    delivery_pincode = Column(String(10), nullable=True)
+    # Scheduling + surge pricing (Layer 2).
+    scheduled_for = Column(DateTime, nullable=True)
+    delivery_fee = Column(Float, nullable=False, default=0.0)
+    surge_multiplier = Column(Float, nullable=False, default=1.0)
+    # Live GPS reported by the driver's device (Layer 2c). When present and
+    # fresh, tracking shows the real position instead of the simulation.
+    driver_lat = Column(Float, nullable=True)
+    driver_lng = Column(Float, nullable=True)
+    driver_updated_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     customer = relationship("User", foreign_keys=[customer_id])
@@ -148,7 +172,10 @@ class PromoCode(Base):
     usage_limit = Column(Integer, nullable=True)
     times_used = Column(Integer, nullable=False, default=0)
     active = Column(Boolean, nullable=False, default=True)
+    restaurant_id = Column(Integer, ForeignKey("restaurants.id"), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    restaurant = relationship("Restaurant")
 
 
 class Review(Base):
@@ -160,8 +187,40 @@ class Review(Base):
     restaurant_id = Column(Integer, ForeignKey("restaurants.id"), nullable=False)
     rating = Column(Integer, nullable=False)
     comment = Column(Text, nullable=True)
+    photo_url = Column(String(255), nullable=True)
+    owner_reply = Column(Text, nullable=True)
+    replied_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     order = relationship("Order")
     user = relationship("User")
     restaurant = relationship("Restaurant")
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    type = Column(String(32), nullable=False, default="info")
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=True)
+    order_id = Column(Integer, nullable=True)
+    read = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    user = relationship("User")
+
+
+class SavedAddress(Base):
+    __tablename__ = "saved_addresses"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    label = Column(String(64), nullable=False)
+    address = Column(String(255), nullable=False)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    user = relationship("User")

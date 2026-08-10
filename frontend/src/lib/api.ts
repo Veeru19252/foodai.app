@@ -8,17 +8,26 @@
 
 import type {
   AdminOverview,
+  AdminUser,
+  AppNotification,
   AuthResponse,
   DriverBrief,
   ForecastSeries,
+  ItemRecommendationResponse,
   MenuItem,
   OrderBrief,
   OrderDetail,
   OrderPrediction,
+  PaymentIntent,
+  PaymentStatus,
+  RazorpayVerifyPayload,
+  Receipt,
   Recommendation,
   Restaurant,
   RestaurantOrder,
   Review,
+  SavedAddress,
+  SurgeState,
   TrackingState,
 } from "@/lib/types";
 
@@ -155,6 +164,82 @@ export const catalogApi = {
     api<MenuItem[]>(`/restaurants/${restaurantId}/menu`),
 };
 
+export interface RestaurantOffer {
+  id: number;
+  code: string;
+  description?: string | null;
+  discount_type: string;
+  discount_value: number;
+  min_order_value: number;
+  max_discount?: number | null;
+  valid_until?: string | null;
+  usage_limit?: number | null;
+  times_used: number;
+  active: boolean;
+  scope: "restaurant" | "platform";
+}
+
+export interface RestaurantAnalytics {
+  restaurant_id: number;
+  restaurant_name: string;
+  total_orders: number;
+  revenue: number;
+  orders_by_status: Record<string, number>;
+  avg_rating: number | null;
+  review_count: number;
+  popular_items: { name: string; quantity: number }[];
+  orders_last_7_days: number;
+}
+
+export const restaurantApi = {
+  me: () =>
+    api<
+      Restaurant & { reviews_rating: number; review_count: number }
+    >("/restaurants/me"),
+  myMenu: () => api<MenuItem[]>("/restaurants/me/menu"),
+  addMenuItem: (payload: {
+    name: string;
+    price: number;
+    prep_time_min: number;
+  }) =>
+    api<{ id: number; name: string; price: number }>("/restaurants/me/menu", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateMenuItem: (
+    itemId: number,
+    payload: { name?: string; price?: number; prep_time_min?: number }
+  ) =>
+    api<{ id: number; name: string; price: number }>(
+      `/restaurants/me/menu/${itemId}`,
+      { method: "PATCH", body: JSON.stringify(payload) }
+    ),
+  deleteMenuItem: (itemId: number) =>
+    api<{ ok: boolean }>(`/restaurants/me/menu/${itemId}`, {
+      method: "DELETE",
+    }),
+  offers: () => api<RestaurantOffer[]>("/restaurants/me/offers"),
+  createOffer: (payload: {
+    code: string;
+    description?: string;
+    discount_type: string;
+    discount_value: number;
+    min_order_value?: number;
+    max_discount?: number;
+    valid_until?: string;
+    usage_limit?: number;
+  }) =>
+    api<RestaurantOffer>("/restaurants/me/offers", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  toggleOffer: (offerId: number) =>
+    api<RestaurantOffer>(`/restaurants/me/offers/${offerId}/toggle`, {
+      method: "PATCH",
+    }),
+  analytics: () => api<RestaurantAnalytics>("/restaurants/me/analytics"),
+};
+
 export const ordersApi = {
   create: (payload: {
     restaurant_id: number;
@@ -163,6 +248,11 @@ export const ordersApi = {
     delivery_lat?: number;
     delivery_lng?: number;
     delivery_address?: string;
+    payment_method?: string;
+    delivery_phone?: string;
+    delivery_city?: string;
+    delivery_state?: string;
+    delivery_pincode?: string;
   }) =>
     api<OrderDetail>("/orders", {
       method: "POST",
@@ -176,15 +266,29 @@ export const ordersApi = {
       delivery_lat?: number;
       delivery_lng?: number;
       delivery_address?: string;
+      scheduled_for?: string;
+      payment_method?: string;
+      delivery_phone?: string;
+      delivery_city?: string;
+      delivery_state?: string;
+      delivery_pincode?: string;
     }[]
   ) =>
     api<{ orders: OrderDetail[] }>("/orders/batch", {
       method: "POST",
       body: JSON.stringify({ orders }),
     }),
+  surge: () => api<SurgeState>("/orders/surge"),
+  receipt: (orderId: number) => api<Receipt>(`/orders/${orderId}/receipt`),
+  emailReceipt: (orderId: number) =>
+    api<{ emailed: boolean; to: string }>(`/orders/${orderId}/receipt/email`, {
+      method: "POST",
+    }),
   cancel: (orderId: number) =>
     api<OrderDetail>(`/orders/${orderId}/cancel`, { method: "POST" }),
   mine: () => api<OrderBrief[]>("/orders"),
+  reorder: (orderId: number) =>
+    api<OrderDetail>(`/orders/${orderId}/reorder`, { method: "POST" }),
   restaurantOrders: () => api<RestaurantOrder[]>("/orders/restaurant"),
   driverOrders: () =>
     api<
@@ -204,10 +308,55 @@ export const ordersApi = {
       `/orders/${orderId}/assign`,
       { method: "POST", body: JSON.stringify({ driver_id: driverId }) }
     ),
+  autoAssign: (orderId: number) =>
+    api<{ delivery_id: number; driver_name: string; message: string; reason: string }>(
+      `/orders/${orderId}/auto-assign`,
+      { method: "POST" }
+    ),
+  nudge: (orderId: number) =>
+    api<{
+      order_id: number;
+      status: string;
+      delay_min: number;
+      risk: "LOW" | "MEDIUM" | "HIGH";
+      message: string;
+      eta_min: number | null;
+      progress: number;
+      elapsed_min?: number;
+    }>(`/orders/${orderId}/nudge`),
+  driverEarnings: () =>
+    api<{
+      per_delivery_rate: number;
+      per_km_rate: number;
+      total_earnings: number;
+      total_deliveries: number;
+      completed_deliveries: number;
+      active_deliveries: number;
+      recent: {
+        delivery_id: number;
+        order_id: number;
+        restaurant_name: string;
+        customer_name: string;
+        distance_km: number;
+        earned: number;
+        completed_at: string | null;
+      }[];
+    }>("/orders/driver/earnings"),
   updateStatus: (orderId: number, status: string) =>
     api<OrderDetail>(`/orders/${orderId}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status }),
+    }),
+  updateDriverLocation: (orderId: number, lat: number, lng: number) =>
+    api<{
+      ok: boolean;
+      order_id: number;
+      driver_lat: number;
+      driver_lng: number;
+      updated_at: string;
+    }>(`/orders/${orderId}/driver-location`, {
+      method: "PUT",
+      body: JSON.stringify({ lat, lng }),
     }),
   validatePromo: (code: string, orderTotal: number) =>
     api<{ ok: boolean; message: string; discount: number }>(
@@ -217,33 +366,109 @@ export const ordersApi = {
 };
 
 export const reviewsApi = {
-  create: (orderId: number, rating: number, comment?: string) =>
+  create: (orderId: number, rating: number, comment?: string, photoUrl?: string) =>
     api<Review>("/reviews", {
       method: "POST",
-      body: JSON.stringify({ order_id: orderId, rating, comment: comment || null }),
+      body: JSON.stringify({
+        order_id: orderId,
+        rating,
+        comment: comment || null,
+        photo_url: photoUrl || null,
+      }),
     }),
   forRestaurant: (restaurantId: number) =>
     api<Review[]>(`/reviews/restaurant/${restaurantId}`),
+  myRestaurantReviews: () => api<Review[]>("/reviews/me"),
+  reply: (reviewId: number, reply: string) =>
+    api<Review>(`/reviews/${reviewId}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ reply }),
+    }),
+};
+
+export const addressesApi = {
+  list: () => api<SavedAddress[]>("/addresses"),
+  create: (payload: {
+    label: string;
+    address: string;
+    lat?: number;
+    lng?: number;
+  }) =>
+    api<SavedAddress>("/addresses", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  remove: (addressId: number) =>
+    api<{ ok: boolean }>(`/addresses/${addressId}`, { method: "DELETE" }),
 };
 
 export const trackingApi = {
   state: (orderId: number) => api<TrackingState>(`/tracking/${orderId}`),
 };
 
+export const paymentsApi = {
+  status: (orderId: number) =>
+    api<PaymentStatus>(`/payments/orders/${orderId}`),
+  codConfirm: (orderId: number) =>
+    api<PaymentStatus>(`/payments/orders/${orderId}/cod/confirm`, {
+      method: "POST",
+    }),
+  codCancel: (orderId: number) =>
+    api<PaymentStatus>(`/payments/orders/${orderId}/cod/cancel`, {
+      method: "POST",
+    }),
+  razorpayOrder: (orderId: number) =>
+    api<PaymentIntent>(`/payments/razorpay/order`, {
+      method: "POST",
+      body: JSON.stringify({ order_id: orderId }),
+    }),
+  razorpayVerify: (payload: RazorpayVerifyPayload) =>
+    api<PaymentStatus>(`/payments/razorpay/verify`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+};
+
+export const notificationApi = {
+  list: () => api<{ items: AppNotification[]; unread: number }>("/notifications"),
+  markRead: (id: number) =>
+    api<AppNotification>(`/notifications/${id}/read`, { method: "POST" }),
+  markAllRead: () =>
+    api<{ ok: boolean }>("/notifications/read-all", { method: "POST" }),
+};
+
 export const mlApi = {
   forecastSeries: (hours = 6) =>
     api<ForecastSeries>(`/ml/forecast/series?hours=${hours}`),
   recommendations: () => api<{ recommendations: Recommendation[]; fallback: boolean }>("/ml/recommendations"),
+  itemRecommendations: (restaurantId: number) =>
+    api<ItemRecommendationResponse>(
+      `/ml/recommendations/items?restaurant_id=${restaurantId}`
+    ),
   orderPrediction: (orderId: number) =>
     api<OrderPrediction>(`/ml/order/${orderId}`),
+  retrainForecast: () =>
+    api<{
+      ok: boolean;
+      model_path: string;
+      samples: { corpus: number; live: number; total: number };
+      demand_buckets: number;
+      metrics: {
+        moving_average: { mae: number; rmse: number; mape: number };
+        xgboost: { mae: number; rmse: number; mape: number };
+      };
+      retrained_at: string;
+    }>("/ml/forecast/retrain", { method: "POST" }),
 };
 
 export const adminApi = {
   overview: () => api<AdminOverview>("/admin/overview"),
-  users: () =>
-    api<{ id: number; name: string; email: string; role: string }[]>(
-      "/admin/users"
-    ),
+  users: () => api<AdminUser[]>("/admin/users"),
+  updateUserRole: (userId: number, role: string) =>
+    api<{ id: number; role: string }>(`/admin/users/${userId}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
   orders: () =>
     api<
       {

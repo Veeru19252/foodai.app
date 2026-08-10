@@ -46,7 +46,7 @@ export default function RestaurantsPage() {
     <ProtectedRoute role="customer">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Restaurants near you</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Restaurants near you</h1>
           <p className="text-sm text-gray-500">
             Track every order live with AI-predicted ETAs
           </p>
@@ -95,7 +95,7 @@ export default function RestaurantsPage() {
           <p className="mb-3 text-xs text-gray-500">
             Personalized picks from your past orders and cuisine preferences.
           </p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="stagger grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {recommendations.map((rec) => (
               <button
                 key={rec.restaurant_id}
@@ -110,7 +110,7 @@ export default function RestaurantsPage() {
                     reviews_rating: rec.reviews_rating,
                   })
                 }
-                className="group rounded-2xl border border-brand-200 bg-brand-50/50 p-4 text-left shadow-sm transition hover:shadow-md"
+                className="press group rounded-2xl border border-brand-200 bg-gradient-to-br from-brand-50/80 to-white p-4 text-left shadow-sm transition-shadow duration-200 hover:shadow-md"
               >
                 <div className="mb-1 flex items-center justify-between">
                   <h3 className="font-semibold group-hover:text-brand-600">
@@ -130,12 +130,12 @@ export default function RestaurantsPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="stagger grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {restaurants.map((r) => (
           <button
             key={r.id}
             onClick={() => setSelected(r)}
-            className="group rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-sm transition hover:shadow-md"
+            className="press card-premium group p-5 text-left"
           >
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-lg font-semibold group-hover:text-brand-600">
@@ -146,6 +146,11 @@ export default function RestaurantsPage() {
               </span>
             </div>
             <p className="text-sm text-gray-500">{r.cuisine}</p>
+            {r.city && (
+              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand-700 ring-1 ring-brand-100">
+                {r.city}
+              </span>
+            )}
             <p className="mt-1 text-xs text-gray-400">{r.address}</p>
             {r.review_count > 0 && (
               <p className="mt-2 text-xs text-gray-500">
@@ -171,12 +176,15 @@ export default function RestaurantsPage() {
       )}
 
       {cartSummary.length > 0 && (
-        <div className="fixed bottom-4 left-1/2 z-[70] w-[min(92vw,480px)] -translate-x-1/2 rounded-2xl bg-gray-900 px-5 py-3 text-white shadow-xl">
+        <div className="fixed bottom-4 left-1/2 z-[70] w-[min(92vw,480px)] -translate-x-1/2 rounded-2xl bg-gray-900/90 px-5 py-3 text-white shadow-2xl backdrop-blur-xl">
           <div className="flex items-center justify-between text-sm">
             <span>
               {count} item{count === 1 ? "" : "s"} in cart
             </span>
-            <Link href="/checkout" className="font-semibold text-brand-500">
+            <Link
+              href="/checkout"
+              className="press font-semibold text-brand-400 transition-colors duration-150 hover:text-brand-300"
+            >
               View cart →
             </Link>
           </div>

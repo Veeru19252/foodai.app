@@ -22,6 +22,9 @@ export interface Restaurant {
   rating: number;
   review_count: number;
   reviews_rating: number;
+  city?: string | null;
+  lat?: number | null;
+  lng?: number | null;
 }
 
 export interface MenuItem {
@@ -53,7 +56,43 @@ export interface Review {
   user_name: string;
   rating: number;
   comment?: string | null;
+  photo_url?: string | null;
+  owner_reply?: string | null;
+  replied_at?: string | null;
   created_at: string;
+}
+
+export interface AppNotification {
+  id: number;
+  type: string;
+  title: string;
+  message?: string | null;
+  order_id?: number | null;
+  read: boolean;
+  created_at: string;
+}
+
+export interface SurgeState {
+  hour: number;
+  total_load: number;
+  surge_multiplier: number;
+  delivery_fee: number;
+}
+
+export interface Receipt {
+  order_id: number;
+  restaurant_name: string;
+  customer_name: string;
+  billed_to?: string | null;
+  items: OrderItemOut[];
+  food_total: number;
+  discount_amount: number;
+  delivery_fee: number;
+  surge_multiplier: number;
+  grand_total: number;
+  payment_method: string;
+  payment_status: string;
+  placed_at: string;
 }
 
 export interface OrderBrief {
@@ -64,6 +103,11 @@ export interface OrderBrief {
   total: number;
   created_at: string;
   delivery_address?: string | null;
+  delivery_city?: string | null;
+  scheduled_for?: string | null;
+  // Layer 4: payment info is returned on every order (list + detail).
+  payment_method?: string;
+  payment_status?: string;
 }
 
 export interface RestaurantOrder {
@@ -88,6 +132,14 @@ export interface OrderDetail extends OrderBrief {
   discount_amount: number;
   delivery_lat?: number | null;
   delivery_lng?: number | null;
+  payment_method?: string;
+  payment_status?: string;
+  delivery_fee?: number;
+  surge_multiplier?: number;
+  delivery_phone?: string | null;
+  delivery_city?: string | null;
+  delivery_state?: string | null;
+  delivery_pincode?: string | null;
   items: OrderItemOut[];
 }
 
@@ -95,8 +147,10 @@ export interface TrackingState {
   order_id: number;
   status: string;
   restaurant_name: string;
+  restaurant_city?: string | null;
   customer_name: string;
   delivery_address?: string | null;
+  delivery_city?: string | null;
   route: number[][];
   route_distance_km: number;
   rider_lat: number;
@@ -104,6 +158,11 @@ export interface TrackingState {
   progress: number;
   eta_min?: number | null;
   eta_source: string;
+  /** "live" when the driver is sharing GPS, else "simulated". */
+  position_source?: "live" | "simulated";
+  created_at?: string | null;
+  pickup_time?: string | null;
+  delivered_time?: string | null;
 }
 
 export interface DriverBrief {
@@ -161,4 +220,62 @@ export interface Recommendation {
   review_count: number;
   score: number;
   reason: string;
+}
+
+export interface ItemRecommendation {
+  menu_item_id: number;
+  name: string;
+  price: number;
+  prep_time_min: number;
+  score: number;
+  reason: string;
+}
+
+export interface ItemRecommendationResponse {
+  items: ItemRecommendation[];
+  fallback: boolean;
+}
+
+export interface SavedAddress {
+  id: number;
+  label: string;
+  address: string;
+  lat?: number | null;
+  lng?: number | null;
+  created_at: string;
+}
+
+export interface AdminUser {
+  id: number;
+  name: string;
+  email: string;
+  role: Role;
+}
+
+// ---- Layer 4: payments -----------------------------------------------------
+
+export interface PaymentStatus {
+  order_id: number;
+  payment_method: string;
+  payment_status: string;
+  payment_id?: string | null;
+  amount: number;
+}
+
+export interface PaymentIntent {
+  order_id: number;
+  amount: number;
+  amount_paise: number;
+  currency: string;
+  razorpay_order_id: string;
+  key_id: string;
+  test_mode: boolean;
+  notes?: Record<string, unknown>;
+}
+
+export interface RazorpayVerifyPayload {
+  order_id: number;
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
 }

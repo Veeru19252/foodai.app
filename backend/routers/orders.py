@@ -8,7 +8,9 @@ database.py (validate_promo_code / calculate_discount / increment usage).
 """
 
 from datetime import date, datetime
+from typing import Optional
 
+import tracking
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -21,22 +23,35 @@ from backend.models import (
     OrderItem,
     PromoCode,
     Restaurant,
+    TripLog,
     User,
     VALID_ORDER_STATUSES,
+    VALID_PAYMENT_METHODS,
 )
 from backend.schemas import (
     AssignDeliveryRequest,
     BatchOrderRequest,
     BatchOrderResponse,
     CreateOrderRequest,
+    DriverLocationUpdate,
     OrderItemOut,
     OrderOut,
     PromoApplyRequest,
     PromoApplyResponse,
+    ReceiptResponse,
+    SurgeResponse,
     UpdateOrderStatusRequest,
 )
 from backend.simulation import publish_sync
 from backend.security import get_current_user
+from backend.tracking_state import (
+    eta_for_order,
+    order_route,
+    progress_at_position,
+    restaurant_start,
+    rider_progress,
+)
+from backend.routers.notifications import notify
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -103,7 +118,11 @@ def _order_brief(order: Order) -> dict:
         "status": order.status,
         "total": round(order.total, 2),
         "created_at": order.created_at,
+        "scheduled_for": order.scheduled_for,
         "delivery_address": order.delivery_address,
+        "delivery_city": order.delivery_city,
+        "payment_method": order.payment_method,
+        "payment_status": order.payment_status,
     }
 
 
@@ -119,6 +138,15 @@ def _order_detail(order: Order) -> dict:
         "discount_amount": round(order.discount_amount, 2),
         "delivery_lat": order.delivery_lat,
         "delivery_lng": order.delivery_lng,
+        "payment_method": order.payment_method,
+        "payment_status": order.payment_status,
+        "delivery_phone": order.delivery_phone,
+        "delivery_city": order.delivery_city,
+        "delivery_state": order.delivery_state,
+        "delivery_pincode": order.delivery_pincode,
+        "scheduled_for": order.scheduled_for,
+        "delivery_fee": round(order.delivery_fee, 2),
+        "surge_multiplier": order.surge_multiplier,
         "items": [i.dict() for i in items],
     }
 
@@ -140,6 +168,46 @@ def validate_promo(
     ok, message, promo = validate_promo_code(db, payload.code, payload.order_total)
     discount = calculate_discount(promo, payload.order_total) if promo else 0.0
     return PromoApplyResponse(ok=ok, message=message, discount=discount)
+
+
+# ---- surge pricing ----
+
+BASE_DELIVERY_FEE = 25.0
+SURGE_MIN_LOAD = 180
+SURGE_MAX_MULTIPLIER = 1.5
+
+
+def surge_state(hour: Optional[int] = None) -> dict:
+    """Delivery fee + surge multiplier from the simulated kitchen load.
+
+    The multiplier climbs only once the platform is busy (high incoming
+    order load across all kitchen zones) so riders get a higher incentive
+    during peaks. Base fee ₹25; peak fee up to ₹37.5.
+    """
+    load = simulation.kitchen_load(hour)
+    total = load["total"]
+    if total <= SURGE_MIN_LOAD:
+        multiplier = 1.0
+    else:
+        multiplier = 1.0 + min(
+            (total - SURGE_MIN_LOAD) / 300.0,
+            SURGE_MAX_MULTIPLIER - 1.0,
+        )
+    multiplier = round(multiplier, 2)
+    return {
+        "hour": load["hour"],
+        "total_load": total,
+        "surge_multiplier": multiplier,
+        "delivery_fee": round(BASE_DELIVERY_FEE * multiplier, 2),
+    }
+
+
+@router.get("/surge", response_model=SurgeResponse)
+def current_surge(
+    user: User = Depends(security.get_current_user),
+):
+    """Current delivery-fee state so checkout can show surge before ordering."""
+    return surge_state()
 
 
 @router.get("")
@@ -202,6 +270,60 @@ def driver_orders(user: User = Depends(security.require_roles("delivery")), db: 
     return result
 
 
+PER_DELIVERY_RATE = 60.0
+PER_KM_RATE = 12.0
+
+
+@router.get("/driver/earnings")
+def driver_earnings(
+    user: User = Depends(security.require_roles("delivery")),
+    db: Session = Depends(get_db),
+):
+    """Driver earnings dashboard: flat rate per delivered order plus a
+    distance-based top-up, computed from completed deliveries only."""
+    deliveries = (
+        db.query(Delivery)
+        .filter(Delivery.driver_id == user.id)
+        .order_by(Delivery.id.desc())
+        .all()
+    )
+    completed = [d for d in deliveries if d.delivered_time is not None]
+    recent = []
+    total_earned = 0.0
+    for d in deliveries:
+        order = db.query(Order).filter(Order.id == d.order_id).first()
+        if order is None:
+            continue
+        try:
+            _route, distance_km = order_route(order)
+        except ValueError:
+            distance_km = 1.0
+        distance_km = max(distance_km, 1.0)
+        earned = PER_DELIVERY_RATE + PER_KM_RATE * distance_km
+        if d.delivered_time is not None:
+            total_earned += earned
+        recent.append({
+            "delivery_id": d.id,
+            "order_id": order.id,
+            "restaurant_name": order.restaurant.name if order.restaurant else "",
+            "customer_name": order.customer.name if order.customer else "",
+            "distance_km": round(distance_km, 2),
+            "earned": round(earned, 2) if d.delivered_time else 0.0,
+            "completed_at": d.delivered_time,
+        })
+    return {
+        "per_delivery_rate": PER_DELIVERY_RATE,
+        "per_km_rate": PER_KM_RATE,
+        "total_earnings": round(total_earned, 2),
+        "total_deliveries": len(deliveries),
+        "completed_deliveries": len(completed),
+        "active_deliveries": sum(
+            1 for d in deliveries if d.pickup_time is not None and d.delivered_time is None
+        ),
+        "recent": recent[:10],
+    }
+
+
 def _create_single_order(db: Session, user: User, payload: CreateOrderRequest) -> Order:
     """Create one order for a restaurant group (shared by single + batch)."""
     restaurant = db.query(Restaurant).filter(Restaurant.id == payload.restaurant_id).first()
@@ -227,6 +349,19 @@ def _create_single_order(db: Session, user: User, payload: CreateOrderRequest) -
             raise HTTPException(status_code=400, detail=message)
         discount = calculate_discount(promo, subtotal)
 
+    if payload.payment_method not in VALID_PAYMENT_METHODS:
+        raise HTTPException(status_code=400, detail="Unsupported payment method.")
+
+    surge = surge_state()
+    scheduled_for = None
+    if payload.scheduled_for is not None:
+        scheduled_at = payload.scheduled_for
+        if isinstance(scheduled_at, str):
+            scheduled_at = datetime.fromisoformat(scheduled_at)
+        if scheduled_at < datetime.utcnow():
+            raise HTTPException(status_code=400, detail="Scheduled time must be in the future.")
+        scheduled_for = scheduled_at
+
     order = Order(
         customer_id=user.id,
         restaurant_id=payload.restaurant_id,
@@ -236,6 +371,14 @@ def _create_single_order(db: Session, user: User, payload: CreateOrderRequest) -
         delivery_lat=payload.delivery_lat,
         delivery_lng=payload.delivery_lng,
         delivery_address=payload.delivery_address,
+        payment_method=payload.payment_method,
+        delivery_phone=payload.delivery_phone,
+        delivery_city=payload.delivery_city,
+        delivery_state=payload.delivery_state,
+        delivery_pincode=payload.delivery_pincode,
+        scheduled_for=scheduled_for,
+        delivery_fee=surge["delivery_fee"],
+        surge_multiplier=surge["surge_multiplier"],
         status="PLACED",
     )
     db.add(order)
@@ -260,7 +403,17 @@ def create_order(
     user: User = Depends(customer_only),
     db: Session = Depends(get_db),
 ):
-    return _order_detail(_create_single_order(db, user, payload))
+    order = _create_single_order(db, user, payload)
+    if order.restaurant is not None and order.restaurant.user_id:
+        notify(
+            db,
+            order.restaurant.user_id,
+            "new_order",
+            "New order received",
+            f"Order #{order.id} from {user.name} — ₹{order.total:.0f}",
+            order.id,
+        )
+    return _order_detail(order)
 
 
 @router.post("/batch", response_model=BatchOrderResponse, status_code=201)
@@ -271,15 +424,77 @@ def create_orders_batch(
 ):
     """Create one order per restaurant group in a single cart (Swiggy-style)."""
     orders = [_create_single_order(db, user, req) for req in payload.orders]
+    for order in orders:
+        if order.restaurant is not None and order.restaurant.user_id:
+            notify(
+                db,
+                order.restaurant.user_id,
+                "new_order",
+                "New order received",
+                f"Order #{order.id} from {user.name} — ₹{order.total:.0f}",
+                order.id,
+            )
     return BatchOrderResponse(orders=[_order_detail(o) for o in orders])
 
 
-@router.get("/{order_id}")
-def get_order(
+@router.post("/{order_id}/reorder", response_model=OrderOut, status_code=201)
+def reorder_order(
     order_id: int,
-    user: User = Depends(security.get_current_user),
+    user: User = Depends(customer_only),
     db: Session = Depends(get_db),
 ):
+    """One-tap "Order again": clone a past order's items into a fresh PLACED
+    order at the same restaurant (prices re-resolved server-side)."""
+    source = db.query(Order).filter(Order.id == order_id).first()
+    if source is None:
+        raise HTTPException(status_code=404, detail="Order not found.")
+    if source.customer_id != user.id:
+        raise HTTPException(status_code=403, detail="You cannot reorder this order.")
+
+    menu = {
+        mi.id: mi
+        for mi in db.query(MenuItem)
+        .filter(MenuItem.restaurant_id == source.restaurant_id)
+        .all()
+    }
+    for oi in source.items:
+        if oi.menu_item_id not in menu:
+            raise HTTPException(
+                status_code=400,
+                detail="One or more items are no longer on this restaurant's menu.",
+            )
+
+    subtotal = sum(menu[oi.menu_item_id].price * oi.quantity for oi in source.items)
+    order = Order(
+        customer_id=user.id,
+        restaurant_id=source.restaurant_id,
+        total=round(subtotal, 2),
+        delivery_lat=source.delivery_lat,
+        delivery_lng=source.delivery_lng,
+        delivery_address=source.delivery_address,
+        payment_method=source.payment_method,
+        delivery_phone=source.delivery_phone,
+        delivery_city=source.delivery_city,
+        delivery_state=source.delivery_state,
+        delivery_pincode=source.delivery_pincode,
+        status="PLACED",
+    )
+    db.add(order)
+    db.flush()
+    for oi in source.items:
+        db.add(OrderItem(
+            order_id=order.id,
+            menu_item_id=oi.menu_item_id,
+            quantity=oi.quantity,
+            price=menu[oi.menu_item_id].price,
+        ))
+    db.commit()
+    db.refresh(order)
+    return _order_detail(order)
+
+
+def _ensure_order_accessible(db: Session, user: User, order_id: int) -> Order:
+    """Return the order or 404/403 unless the user may view it."""
     order = db.query(Order).filter(Order.id == order_id).first()
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found.")
@@ -296,7 +511,67 @@ def get_order(
         and not any(r.id == order.restaurant_id for r in user.restaurants)
     ):
         raise HTTPException(status_code=403, detail="You cannot access this order.")
+    return order
+
+
+@router.get("/{order_id}")
+def get_order(
+    order_id: int,
+    user: User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
+    order = _ensure_order_accessible(db, user, order_id)
     return _order_detail(order)
+
+
+@router.get("/{order_id}/receipt", response_model=ReceiptResponse)
+def order_receipt(
+    order_id: int,
+    user: User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Itemised receipt — used by the "view / email receipt" actions."""
+    order = _ensure_order_accessible(db, user, order_id)
+    items = [
+        OrderItemOut(name=oi.menu_item.name if oi.menu_item else "Item", quantity=oi.quantity, price=oi.price)
+        for oi in order.items
+    ]
+    food_total = sum(item.price * item.quantity for item in items)
+    return {
+        "order_id": order.id,
+        "restaurant_name": order.restaurant.name if order.restaurant else "",
+        "customer_name": order.customer.name if order.customer else "",
+        "billed_to": order.customer.email if order.customer else None,
+        "items": [i.dict() for i in items],
+        "food_total": round(food_total, 2),
+        "discount_amount": round(order.discount_amount, 2),
+        "delivery_fee": round(order.delivery_fee, 2),
+        "surge_multiplier": order.surge_multiplier,
+        "grand_total": round(
+            max(0.0, food_total - order.discount_amount) + order.delivery_fee, 2
+        ),
+        "payment_method": order.payment_method,
+        "payment_status": order.payment_status,
+        "placed_at": order.created_at,
+    }
+
+
+@router.post("/{order_id}/receipt/email")
+def email_receipt(
+    order_id: int,
+    user: User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Deliver the receipt by email. This demo writes the receipt to the log
+    instead of calling a real SMTP provider; the response is what the UI
+    shows as a successful email."""
+    order = _ensure_order_accessible(db, user, order_id)
+    recipient = order.customer.email if order.customer else user.email
+    import logging
+    logging.getLogger("foodai.receipts").info(
+        "Receipt emailed for order %s to %s", order.id, recipient
+    )
+    return {"emailed": True, "to": recipient, "order_id": order.id}
 
 
 @router.patch("/{order_id}/status")
@@ -349,6 +624,20 @@ def update_order_status(
         if delivery is not None and delivery.pickup_time is None:
             delivery.pickup_time = datetime.utcnow()
     db.commit()
+    # Notify the customer on the big milestones.
+    if payload.status in ("OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED"):
+        notify(
+            db,
+            order.customer_id,
+            "order_update",
+            f"Order #{order.id} {payload.status.replace('_', ' ').title()}",
+            {
+                "OUT_FOR_DELIVERY": "Your rider is on the way with your food.",
+                "DELIVERED": "Your order has been delivered. Enjoy!",
+                "CANCELLED": "Your order was cancelled.",
+            }[payload.status],
+            order.id,
+        )
     return _order_detail(order)
 
 
@@ -398,10 +687,159 @@ def assign_delivery(
     order.delivery_id = payload.driver_id
     db.commit()
     db.refresh(delivery)
-    # Notify the driver in real time over their notification channel.
+    # Notify the driver in real time (persisted + pushed over their channel).
+    notify(
+        db,
+        driver.id,
+        "delivery_assigned",
+        "New delivery assigned",
+        f"New delivery assigned for order #{order.id} from {order.restaurant.name if order.restaurant else 'Restaurant'}",
+        order.id,
+    )
+    return {"delivery_id": delivery.id, "message": "Delivery assigned."}
+
+
+@router.put("/{order_id}/driver-location")
+def update_driver_location(
+    order_id: int,
+    payload: DriverLocationUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Report the driver's live GPS position for an order in transit.
+
+    Only the driver assigned to the order (or an admin) may report a fix.
+    The position is timestamped on the order and pushed immediately to the
+    order's tracking channel, so the customer's map marker follows the real
+    scooter instead of the simulator.
+    """
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found.")
+    if user.role != "admin":
+        if user.role != "delivery":
+            raise HTTPException(
+                status_code=403,
+                detail="Only the assigned driver may report a location.",
+            )
+        is_driver = (
+            db.query(Delivery)
+            .filter(Delivery.order_id == order_id, Delivery.driver_id == user.id)
+            .first()
+            is not None
+        )
+        if not is_driver:
+            raise HTTPException(
+                status_code=403, detail="You are not assigned to this order."
+            )
+    order.driver_lat = payload.lat
+    order.driver_lng = payload.lng
+    order.driver_updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(order)
+    publish_sync(
+        simulation.manager,
+        order.id,
+        {
+            "type": "position",
+            "order_id": order.id,
+            "status": order.status,
+            "lat": round(payload.lat, 6),
+            "lng": round(payload.lng, 6),
+            "progress": round(
+                progress_at_position(order, payload.lat, payload.lng), 4
+            ),
+        },
+    )
+    return {
+        "ok": True,
+        "order_id": order.id,
+        "driver_lat": round(payload.lat, 6),
+        "driver_lng": round(payload.lng, 6),
+        "updated_at": order.driver_updated_at,
+    }
+
+
+def _rider_last_position(db: Session, driver_id: int, fallback) -> tuple:
+    """Return the rider's last known position (latest TripLog), else fallback."""
+    log = (
+        db.query(TripLog)
+        .join(Delivery, Delivery.id == TripLog.delivery_id)
+        .filter(Delivery.driver_id == driver_id)
+        .order_by(TripLog.timestamp.desc())
+        .first()
+    )
+    if log is None:
+        return fallback
+    return (log.lat, log.lng)
+
+
+def _rider_load(db: Session, driver_id: int) -> dict:
+    deliveries = db.query(Delivery).filter(Delivery.driver_id == driver_id).all()
+    active = sum(1 for d in deliveries if d.pickup_time is not None and d.delivered_time is None)
+    queued = sum(1 for d in deliveries if d.pickup_time is None)
+    return {"active": active, "queued": queued, "load": active * 2 + queued}
+
+
+@router.post("/{order_id}/auto-assign")
+def auto_assign_delivery(
+    order_id: int,
+    user: User = Depends(restaurant_or_admin),
+    db: Session = Depends(get_db),
+):
+    """Smart auto-dispatch: pick the rider with the lowest combined load and
+    distance-to-restaurant score (Swiggy-style smart allocation)."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found.")
+    if user.role == "restaurant" and order.restaurant_id not in [
+        r.id for r in user.restaurants
+    ]:
+        raise HTTPException(status_code=403, detail="Not your restaurant's order.")
+    existing = db.query(Delivery).filter(Delivery.order_id == order_id).first()
+    if existing is not None:
+        driver = db.query(User).filter(User.id == existing.driver_id).first()
+        return {
+            "delivery_id": existing.id,
+            "driver_name": driver.name if driver else "",
+            "message": "Delivery already assigned.",
+            "reason": "Rider already assigned to this order",
+        }
+
+    drivers = (
+        db.query(User)
+        .filter(User.role == "delivery")
+        .order_by(User.name)
+        .all()
+    )
+    if not drivers:
+        raise HTTPException(status_code=400, detail="No riders available.")
+
+    restaurant_pos = restaurant_start(order)
+
+    best = None
+    for driver in drivers:
+        load = _rider_load(db, driver.id)
+        pos = _rider_last_position(db, driver.id, restaurant_pos)
+        dist_km = tracking.haversine_km(pos, restaurant_pos)
+        score = load["load"] + dist_km * 0.5
+        candidate = {
+            "driver": driver,
+            "load": load,
+            "dist_km": dist_km,
+            "score": score,
+        }
+        if best is None or score < best["score"]:
+            best = candidate
+
+    delivery = Delivery(order_id=order_id, driver_id=best["driver"].id)
+    db.add(delivery)
+    order.delivery_id = best["driver"].id
+    db.commit()
+    db.refresh(delivery)
     publish_sync(
         simulation.notifications_manager,
-        f"user:{driver.id}",
+        f"user:{best['driver'].id}",
         {
             "type": "delivery_assigned",
             "order_id": order.id,
@@ -410,4 +848,90 @@ def assign_delivery(
             "message": f"New delivery assigned for order #{order.id}",
         },
     )
-    return {"delivery_id": delivery.id, "message": "Delivery assigned."}
+    return {
+        "delivery_id": delivery.id,
+        "driver_name": best["driver"].name,
+        "message": "Rider auto-assigned.",
+        "reason": (
+            f"Lowest load ({best['load']['active']} active, {best['load']['queued']} queued) "
+            f"and {best['dist_km']:.1f} km from the restaurant"
+        ),
+    }
+
+
+@router.get("/{order_id}/nudge")
+def order_nudge(
+    order_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delay-prediction nudge for restaurant owners, the assigned rider, and
+    admins. Compares elapsed time against the ML/route ETA and flags at-risk
+    orders so they can be reprioritized."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found.")
+    is_restaurant_owner = (
+        user.role == "restaurant"
+        and any(r.id == order.restaurant_id for r in user.restaurants)
+    )
+    is_admin = user.role == "admin"
+    is_assigned_driver = (
+        user.role == "delivery"
+        and db.query(Delivery)
+        .filter(Delivery.order_id == order_id, Delivery.driver_id == user.id)
+        .first()
+        is not None
+    )
+    if not (is_restaurant_owner or is_admin or is_assigned_driver):
+        raise HTTPException(status_code=403, detail="You cannot view this order.")
+
+    delivery = db.query(Delivery).filter(Delivery.order_id == order_id).first()
+    route, _ = order_route(order)
+    progress, _rider = rider_progress(order, delivery)
+    eta_min, _source = eta_for_order(order, progress)
+
+    if order.status in ("DELIVERED", "CANCELLED"):
+        return {
+            "order_id": order.id,
+            "status": order.status,
+            "delay_min": 0,
+            "risk": "LOW",
+            "message": "Order finished.",
+            "eta_min": eta_min,
+            "progress": round(progress, 4),
+        }
+
+    elapsed_min = (
+        (datetime.utcnow() - order.created_at).total_seconds() / 60.0
+        if order.created_at
+        else 0.0
+    )
+    # Expected full-trip minutes = prep allowance + whole-route travel time.
+    travel_min = tracking.compute_eta(route, 0.0, tracking.AVG_SPEED_KMH)
+    expected_total = 15 + travel_min
+    delay = max(0.0, elapsed_min - expected_total)
+
+    if delay >= 10:
+        risk = "HIGH"
+        message = (
+            f"This order is running ~{delay:.0f} min late. Consider prioritizing "
+            "prep or reassigning the rider."
+        )
+    elif delay >= 3:
+        risk = "MEDIUM"
+        message = f"This order is running ~{delay:.0f} min behind. Keep it moving."
+    else:
+        risk = "LOW"
+        message = "On track — no action needed."
+
+    return {
+        "order_id": order.id,
+        "status": order.status,
+        "delay_min": round(delay, 1),
+        "risk": risk,
+        "message": message,
+        "eta_min": eta_min,
+        "progress": round(progress, 4),
+        "elapsed_min": round(elapsed_min, 1),
+    }

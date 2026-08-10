@@ -19,6 +19,24 @@ from backend.main import app
 from backend import seed
 
 
+@pytest.fixture(autouse=True)
+def isolated_ml_artifacts(tmp_path):
+    """Keep the admin retrain test from rewriting the repo's model files.
+
+    ml_train.py reads its output paths from module-level constants at call
+    time, so monkeypatching them to a temp dir means every pytest run leaves
+    the working tree clean.
+    """
+    from backend import ml_train
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(ml_train, "MODEL_PATH", tmp_path / "forecast_model.joblib")
+    monkey.setattr(ml_train, "META_PATH", tmp_path / "forecast_meta.json")
+    monkey.setattr(ml_train, "METRICS_PATH", tmp_path / "metrics_forecast.json")
+    yield
+    monkey.undo()
+
+
 @pytest.fixture(scope="session")
 def client():
     # Fresh schema + seed data per test session.

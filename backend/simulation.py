@@ -13,6 +13,8 @@ replacing publish()/subscribe() with channel-based calls.
 
 import asyncio
 import logging
+import math
+import random
 import traceback
 from collections import defaultdict
 from datetime import datetime
@@ -20,11 +22,59 @@ from typing import Dict, Optional, Set
 
 from backend.db import SessionLocal
 from backend.models import Delivery, Order, TripLog
-from backend.tracking_state import rider_progress
+from backend.tracking_state import (
+    live_driver_position,
+    progress_at_position,
+    rider_progress,
+)
 
 logger = logging.getLogger("foodai.simulation")
 
 SIM_INTERVAL_SECONDS = 2.0
+
+# Kitchen zones mirror the demand-forecast zones (A–E). Used by the
+# kitchen-load simulation so restaurant owners see expected load.
+KITCHEN_ZONES = ("A", "B", "C", "D", "E")
+
+
+def poisson_count(mean: float) -> int:
+    """Draw one Poisson-distributed integer (Knuth's algorithm).
+
+    mean is the expected number of events; the result clusters around it
+    (a mean of 12 returns 12 most often, 8 or 16 rarely). This gives the
+    kitchen load realistic day-to-day variation instead of a fixed count.
+    """
+    limit = math.exp(-mean)
+    k = 0
+    product = 1.0
+    while product > limit:
+        k += 1
+        product *= random.random()
+    return k - 1
+
+
+def kitchen_load(hour: Optional[int] = None) -> dict:
+    """Simulate each kitchen zone's incoming order load for an hour.
+
+    The expected arrival rate follows a two-hump curve: a modest baseline,
+    a lunch peak near 13:00 and a bigger dinner peak near 20:00. The actual
+    count per zone is a Poisson draw around that expectation, with busier
+    zones (A, B — city centre) scaled up and the quietest (E) scaled down.
+    """
+    if hour is None:
+        hour = datetime.utcnow().hour
+    lunch_peak = 45.0 * math.exp(-0.5 * ((hour - 13) / 2.0) ** 2)
+    dinner_peak = 60.0 * math.exp(-0.5 * ((hour - 20) / 2.0) ** 2)
+    baseline = 10.0
+    loads = {}
+    for zone in KITCHEN_ZONES:
+        expected = baseline + lunch_peak + dinner_peak
+        if zone in ("A", "B"):
+            expected *= 1.25
+        elif zone == "E":
+            expected *= 0.8
+        loads[zone] = poisson_count(expected)
+    return {"hour": hour, "loads": loads, "total": sum(loads.values())}
 
 
 class ConnectionManager:
@@ -82,6 +132,12 @@ def _advance_delivery(db, delivery: Delivery) -> Optional[dict]:
     if order is None or order.status != "OUT_FOR_DELIVERY":
         return None
     progress, rider_pos = rider_progress(order, delivery)
+    # When the driver is sharing live GPS, publish their real position instead
+    # of the simulated rider so the customer marker never jumps backwards.
+    live = live_driver_position(order)
+    if live is not None:
+        rider_pos = live
+        progress = progress_at_position(order, live[0], live[1])
     db.add(TripLog(delivery_id=delivery.id, lat=rider_pos[0], lng=rider_pos[1]))
     delivered = progress >= 1.0
     if delivered:

@@ -20,7 +20,18 @@ from backend import config, simulation
 from backend.db import Base, SessionLocal, engine
 from backend import models  # noqa: F401  (register tables on Base.metadata)
 from backend import seed
-from backend.routers import admin, auth, ml, orders, restaurants, reviews, tracking
+from backend.routers import (
+    addresses,
+    admin,
+    auth,
+    ml,
+    notifications,
+    orders,
+    payments,
+    restaurants,
+    reviews,
+    tracking,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("foodai")
@@ -72,6 +83,9 @@ app.include_router(tracking.ws_router)
 app.include_router(ml.router)
 app.include_router(admin.router)
 app.include_router(reviews.router)
+app.include_router(addresses.router)
+app.include_router(payments.router)
+app.include_router(notifications.router)
 
 
 @app.get("/api/health")

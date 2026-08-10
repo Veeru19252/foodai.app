@@ -8,7 +8,9 @@ interface Props {
   riderLng: number;
 }
 
-/** Leaflet map rendering the delivery route + live rider marker. */
+/** Premium Leaflet map: CARTO Voyager tiles, layered route stroke, labeled
+ *  pickup/delivery pins and a pulsing live-rider marker. Renders client-side
+ *  only (leaflet requires the DOM). */
 export default function TrackingMap({ route, riderLat, riderLng }: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
   const riderMarkerRef = useRef<L.Marker | null>(null);
@@ -27,44 +29,66 @@ export default function TrackingMap({ route, riderLat, riderLng }: Props) {
       leafletMap = L.map(mapRef.current, {
         center: [riderLat, riderLng],
         zoom: 13,
+        zoomControl: true,
       });
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "&copy; OpenStreetMap contributors",
-      }).addTo(leafletMap);
+      L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+        {
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          maxZoom: 19,
+        }
+      ).addTo(leafletMap);
 
-      const bounds = L.latLngBounds(
-        route.map(([lat, lng]) => L.latLng(lat, lng))
-      );
+      const latlngs = route.map(([lat, lng]) => L.latLng(lat, lng));
+
+      const bounds = L.latLngBounds(latlngs);
       if (bounds.isValid()) leafletMap.fitBounds(bounds.pad(0.15));
 
-      if (route.length > 1) {
-        L.polyline(
-          route.map(([lat, lng]) => L.latLng(lat, lng)),
-          { color: "#ea580c", weight: 4, opacity: 0.9 }
-        ).addTo(leafletMap);
+      // Layered stroke: white casing under the brand line reads premium.
+      if (latlngs.length > 1) {
+        L.polyline(latlngs, {
+          color: "#ffffff",
+          weight: 9,
+          opacity: 0.9,
+          lineCap: "round",
+          lineJoin: "round",
+        }).addTo(leafletMap);
+        L.polyline(latlngs, {
+          color: "#ea580c",
+          weight: 4,
+          opacity: 0.95,
+          lineCap: "round",
+          lineJoin: "round",
+        }).addTo(leafletMap);
       }
 
-      L.circleMarker(route[0] as [number, number], {
-        radius: 7,
-        color: "#22c55e",
-        fillColor: "#22c55e",
-        fillOpacity: 1,
-      }).addTo(leafletMap);
-      L.circleMarker(route[route.length - 1] as [number, number], {
-        radius: 7,
-        color: "#ef4444",
-        fillColor: "#ef4444",
-        fillOpacity: 1,
-      }).addTo(leafletMap);
+      if (latlngs.length > 0) {
+        L.marker(latlngs[0], {
+          icon: L.divIcon({
+            className: "",
+            html: `<div class="leaflet-pin" style="border:2px solid #22c55e">🍽️</div>`,
+            iconSize: [30, 30],
+            iconAnchor: [15, 15],
+          }),
+        }).addTo(leafletMap);
+        L.marker(latlngs[latlngs.length - 1], {
+          icon: L.divIcon({
+            className: "",
+            html: `<div class="leaflet-pin" style="border:2px solid #ef4444">📍</div>`,
+            iconSize: [30, 30],
+            iconAnchor: [15, 15],
+          }),
+        }).addTo(leafletMap);
+      }
 
-      // Custom rider marker: a scooter-ish orange dot.
-      const icon = L.divIcon({
+      const riderIcon = L.divIcon({
         className: "",
-        html: `<div style="width:26px;height:26px;border-radius:9999px;background:#ea580c;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,.4);display:grid;place-items:center;font-size:12px;color:#fff;">🛵</div>`,
-        iconSize: [26, 26],
-        iconAnchor: [13, 13],
+        html: `<div class="leaflet-rider-pin"><span class="leaflet-rider-halo"></span><span class="leaflet-rider-dot">🛵</span></div>`,
+        iconSize: [34, 34],
+        iconAnchor: [17, 17],
       });
-      riderMarkerRef.current = L.marker([riderLat, riderLng], { icon }).addTo(
+      riderMarkerRef.current = L.marker([riderLat, riderLng], { icon: riderIcon }).addTo(
         leafletMap
       );
 
@@ -78,12 +102,15 @@ export default function TrackingMap({ route, riderLat, riderLng }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Follow the rider on updates.
+  // Follow the rider on updates — pan (not snap) unless motion is reduced.
   useEffect(() => {
     if (!map || !riderMarkerRef.current) return;
     riderMarkerRef.current.setLatLng([riderLat, riderLng]);
-    map.setView([riderLat, riderLng], map.getZoom());
+    const reduceMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    map.panTo([riderLat, riderLng], { animate: !reduceMotion, duration: 0.5 });
   }, [riderLat, riderLng, map]);
 
-  return <div ref={mapRef} className="h-[420px] w-full" />;
+  return <div ref={mapRef} className="h-[420px] w-full shadow-[0_8px_24px_-12px_rgba(16,24,40,0.2)]" />;
 }

@@ -384,7 +384,7 @@ pytest tests/
 | Live tracking | 6 | Map + simulated GPS | ✅ |
 | **ML #1: ETA** | 7 | XGBoost ETA beats baseline | ✅ |
 | **ML #2: Forecasting** | 8 | Heatmap + comparison table | ✅ |
-| Admin + deploy | 9 | ✅ Admin dashboard · ✅ Customer signup/register · ☐ Hugging Face Spaces · ☐ demo video | ✅ done (deploy pending) |
+| Admin + deploy | 9 | ✅ Admin dashboard · ✅ Customer signup/register · ✅ Driver GPS sharing · ✅ Admin model retrain · ☐ demo video | ✅ done (deploy via `render.yaml`) |
 | Phase 1 | 10–11 | FastAPI + PostgreSQL backend (JWT auth, orders, WebSocket live tracking, ML endpoints) | ✅ |
 | Phase 2 | 11–12 | Next.js frontend (auth, multi-restaurant cart, checkout, live tracking) | ✅ |
 | Phase 3 | 12 | Batch orders, cancellations, reviews, real-time driver notifications | ✅ |
@@ -495,6 +495,11 @@ Runs Alembic migrations automatically; demo data is seeded on first boot.
 ### Deploy to Render (one-click, current)
 
 `render.yaml` is a Render Blueprint that provisions the whole stack (Postgres 16 + FastAPI + Next.js) from this repo:
+> **Operational checklist:** see [`DEPLOY.md`](./DEPLOY.md) for the full
+> pre-deploy validation, post-deploy verification, and rollback steps.
+
+[`render.yaml`](./render.yaml) is a Render Blueprint that provisions the whole
+stack (Postgres 16 + FastAPI + Next.js) from this repo:
 
 1. Push this repo to GitHub (main).
 2. Open https://render.com → **New** → **Blueprint** → connect the `foodai.app` repo.
@@ -537,15 +542,15 @@ Notes:
 ## 🔮 Future Improvements
 
 - [x] **Hugging Face Spaces deployment** — docs + build files ready (see Deploy to Hugging Face Spaces; push with your HF token)
+- [x] **WebSockets** instead of polling — true real-time tracking (WS + 5s REST poll fallback + auto-reconnect)
+- [x] **Real GPS tracking** — driver shares device GPS (`navigator.geolocation`) with a LIVE GPS badge on the customer tracking page
+- [x] **Real payment** integration (Razorpay test mode — COD/Razorpay)
+- [x] **Notifications** (in-app notification bell + per-user WebSocket channel)
+- [x] **Mobile-friendly UI / PWA** — responsive Tailwind layout + manifest + service worker
 - [ ] **Demo video** — record a walkthrough for the final submission
-- [ ] **WebSockets** instead of polling — true real-time tracking
-- [ ] **Real GPS tracking** — replace simulated GPS with actual device location
-- [ ] **Real payment** integration (Razorpay test mode)
 - [ ] **Real open dataset** training (Kaggle food delivery data)
 - [ ] **More features**: traffic-aware ETA, weather data
 - [ ] **LSTM / DeepAR** for forecasting (beyond XGBoost)
-- [ ] **Mobile-friendly UI** or PWA
-- [ ] **Notifications** (email/WhatsApp-style logs)
 
 ---
 

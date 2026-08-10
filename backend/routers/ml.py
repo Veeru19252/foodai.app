@@ -19,11 +19,44 @@ import forecast_service
 import tracking
 
 from backend.db import get_db
-from backend.models import Order, Restaurant, Review, User
-from backend import security
+from backend.models import MenuItem, Order, OrderItem, Restaurant, Review, User
+from backend import security, simulation
 from backend.tracking_state import delivery_end, order_route
 
 router = APIRouter(prefix="/ml", tags=["ml"])
+
+
+@router.get("/kitchen-load")
+def get_kitchen_load(
+    hour: Optional[int] = Query(None),
+    user: User = Depends(security.get_current_user),
+):
+    """Simulated per-zone kitchen load for an hour (Poisson arrivals).
+
+    Feeds the restaurant/admin dashboards with a realistic "how busy is each
+    kitchen zone right now" number. The underlying distribution comes from
+    backend.simulation.kitchen_load(); the ML forecast endpoint is separate
+    and predicts demand hours ahead — this one is the current snapshot.
+    """
+    return simulation.kitchen_load(hour)
+
+
+@router.post("/forecast/retrain")
+def retrain_forecast(
+    user: User = Depends(security.require_roles("admin")),
+):
+    """Retrain the demand-forecast model from historical data + live orders.
+
+    Admin-only. Runs the same pipeline as ``scripts/train_forecast.py``
+    (reused, not copied) and rewrites the model + schema metadata that every
+    forecast endpoint reads, so a retrain takes effect immediately.
+    """
+    from backend import ml_train
+
+    try:
+        return ml_train.retrain_forecast()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 def _parse_point(value: Optional[str]) -> Optional[tuple[float, float]]:
@@ -219,6 +252,94 @@ def get_recommendations(
 
     scored.sort(key=lambda item: item["score"], reverse=True)
     return {"recommendations": scored[:4], "fallback": len(orders) == 0}
+
+
+@router.get("/recommendations/items")
+def get_item_recommendations(
+    restaurant_id: int = Query(...),
+    user: User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Menu-item recommendations for one restaurant ("People also order").
+
+    Scores each item from platform popularity (delivered orders), co-occurrence
+    inside the customer's own past orders at this restaurant, and their
+    personal order frequency. ``fallback`` is true when there is no signal yet.
+    """
+    from collections import Counter, defaultdict
+
+    menu = db.query(MenuItem).filter(MenuItem.restaurant_id == restaurant_id).all()
+    if not menu:
+        return {"items": [], "fallback": True}
+    ids = {m.id: m for m in menu}
+
+    # Platform popularity (delivered orders only)
+    pop_rows = (
+        db.query(OrderItem.menu_item_id, func.count(OrderItem.id))
+        .join(Order, Order.id == OrderItem.order_id)
+        .filter(
+            Order.restaurant_id == restaurant_id,
+            Order.status == "DELIVERED",
+        )
+        .group_by(OrderItem.menu_item_id)
+        .all()
+    )
+    popularity = dict(pop_rows)
+
+    # Personal history: order counts + co-occurrence with what they ordered.
+    my_order_ids = [
+        row[0]
+        for row in db.query(Order.id)
+        .filter(Order.customer_id == user.id, Order.restaurant_id == restaurant_id)
+        .all()
+    ]
+    my_counts: Counter = Counter()
+    cooccur: Counter = Counter()
+    if my_order_ids:
+        my_lines = (
+            db.query(OrderItem).filter(OrderItem.order_id.in_(my_order_ids)).all()
+        )
+        order_to_items: dict = defaultdict(set)
+        for line in my_lines:
+            my_counts[line.menu_item_id] += line.quantity
+            order_to_items[line.order_id].add(line.menu_item_id)
+        for items in order_to_items.values():
+            for mid in items:
+                cooccur[mid] += 1
+                for other in items:
+                    if other != mid:
+                        cooccur[other] += 1
+
+    max_pop = max(popularity.values()) if popularity else 0
+    scored = []
+    for m in menu:
+        pop_norm = popularity.get(m.id, 0) / max_pop if max_pop else 0.0
+        my_norm = min(1.0, my_counts.get(m.id, 0) / 2.0)
+        co_norm = min(1.0, cooccur.get(m.id, 0) / 3.0)
+        score = 0.5 * pop_norm + 0.3 * co_norm + 0.2 * my_norm
+
+        if my_counts.get(m.id):
+            reason = "You order this often"
+        elif co_norm > 0.3:
+            reason = "People order this together"
+        elif pop_norm > 0:
+            reason = "Popular at this restaurant"
+        else:
+            reason = "Fresh on the menu"
+
+        scored.append(
+            {
+                "menu_item_id": m.id,
+                "name": m.name,
+                "price": round(m.price, 2),
+                "prep_time_min": m.prep_time_min,
+                "score": round(score, 3),
+                "reason": reason,
+            }
+        )
+
+    scored.sort(key=lambda item: item["score"], reverse=True)
+    return {"items": scored[:5], "fallback": max_pop == 0 and not my_order_ids}
 
 
 @router.get("/order/{order_id}")
