@@ -67,23 +67,71 @@ def test_cod_defaults_to_pending(client):
 
 
 def test_cod_confirm_and_cancel_flow(client):
-    token = login(client, "customer@foodai.com")["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
+    customer_token = login(client, "customer@foodai.com")["access_token"]
+    customer_headers = {"Authorization": f"Bearer {customer_token}"}
+    rest_token = login(client, "spice@foodai.com")["access_token"]
+    rest_headers = {"Authorization": f"Bearer {rest_token}"}
+    rider_token = login(client, "rider@foodai.com")["access_token"]
+    rider_headers = {"Authorization": f"Bearer {rider_token}"}
 
-    # cancel before collection -> FAILED
-    order = _create_order(client, token, "COD")
-    resp = client.post(f"/payments/orders/{order['id']}/cod/cancel", headers=headers)
+    # Cancel before collection -> FAILED (the customer may reverse their own COD).
+    order = _create_order(client, customer_token, "COD")
+    resp = client.post(
+        f"/payments/orders/{order['id']}/cod/cancel", headers=customer_headers
+    )
     assert resp.status_code == 200, resp.text
     assert resp.json()["payment_status"] == "FAILED"
 
-    # fresh order -> confirm -> PAID
-    order2 = _create_order(client, token, "COD")
-    resp = client.post(f"/payments/orders/{order2['id']}/cod/confirm", headers=headers)
+    # The customer is the payer, not the collector: cash may only be marked
+    # collected by the assigned driver (or admin) after the order is DELIVERED.
+    order2 = _create_order(client, customer_token, "COD")
+    resp = client.post(
+        f"/payments/orders/{order2['id']}/cod/confirm", headers=customer_headers
+    )
+    assert resp.status_code == 400, resp.text
+    assert "delivered" in resp.json()["detail"]
+
+    # Restaurant assigns the driver and dispatches; the rider completes the trip.
+    drivers = client.get("/orders/drivers", headers=rest_headers).json()
+    rider_id = next(d["id"] for d in drivers if d["email"] == "rider@foodai.com")
+    resp = client.post(
+        f"/orders/{order2['id']}/assign",
+        json={"driver_id": rider_id},
+        headers=rest_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    resp = client.patch(
+        f"/orders/{order2['id']}/status",
+        json={"status": "OUT_FOR_DELIVERY"},
+        headers=rest_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    resp = client.patch(
+        f"/orders/{order2['id']}/status",
+        json={"status": "DELIVERED"},
+        headers=rider_headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+    # A different driver (not assigned to this order) cannot collect the cash.
+    other_rider_token = login(client, "priya@foodai.com")["access_token"]
+    other_headers = {"Authorization": f"Bearer {other_rider_token}"}
+    resp = client.post(
+        f"/payments/orders/{order2['id']}/cod/confirm", headers=other_headers
+    )
+    assert resp.status_code == 403, resp.text
+
+    # The assigned driver confirms after delivery -> PAID.
+    resp = client.post(
+        f"/payments/orders/{order2['id']}/cod/confirm", headers=rider_headers
+    )
     assert resp.status_code == 200, resp.text
     assert resp.json()["payment_status"] == "PAID"
 
-    # confirming twice is rejected
-    resp = client.post(f"/payments/orders/{order2['id']}/cod/confirm", headers=headers)
+    # Confirming again is rejected.
+    resp = client.post(
+        f"/payments/orders/{order2['id']}/cod/confirm", headers=rider_headers
+    )
     assert resp.status_code == 400
 
 

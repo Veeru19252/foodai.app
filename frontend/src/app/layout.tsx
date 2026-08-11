@@ -3,6 +3,7 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { CartProvider } from "@/lib/cart";
 import Navbar from "@/components/Navbar";
+import OnboardingGate from "@/components/OnboardingGate";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 
 export const metadata: Metadata = {
@@ -27,6 +28,7 @@ export default function RootLayout({
           <AuthProvider>
             <CartProvider>
               <Navbar />
+              <OnboardingGate />
               <ServiceWorkerRegister />
               <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
             </CartProvider>

@@ -95,14 +95,21 @@ def confirm_cod(
 ):
     """Mark a COD order as collected (cash handed to the rider at the door).
 
-    Only valid for COD orders in a collectable state; admin can confirm any
-    COD order, a customer only their own.
+    Only the assigned driver or an admin may collect: the customer is the
+    payer, not the collector. The order must already be DELIVERED so cash is
+    never marked collected before the food arrives.
     """
     order = _get_order(db, order_id)
-    if not _can_manage_payment(user, order):
-        raise HTTPException(status_code=403, detail="You cannot confirm this payment.")
     if order.payment_method != "COD":
         raise HTTPException(status_code=400, detail="This order is not a COD order.")
+    if order.status != "DELIVERED":
+        raise HTTPException(
+            status_code=400, detail="Cash can only be collected after the order is delivered."
+        )
+    is_admin = user.role == "admin"
+    is_assigned_driver = user.role == "delivery" and order.delivery_id == user.id
+    if not (is_admin or is_assigned_driver):
+        raise HTTPException(status_code=403, detail="Only the assigned driver or an admin can collect cash.")
     if order.payment_status not in ("PENDING", "FAILED"):
         raise HTTPException(
             status_code=400, detail=f"Payment already {order.payment_status}."

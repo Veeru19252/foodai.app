@@ -168,11 +168,28 @@ export const authApi = {
 };
 
 export const catalogApi = {
-  restaurants: (cuisine?: string) =>
-    api<Restaurant[]>(
-      `/restaurants${cuisine && cuisine !== "All" ? `?cuisine=${encodeURIComponent(cuisine)}` : ""}`
-    ),
+  restaurants: (
+    cuisine?: string,
+    city?: string,
+    lat?: number,
+    lng?: number
+  ) => {
+    const params: string[] = [];
+    if (cuisine && cuisine !== "All") {
+      params.push(`cuisine=${encodeURIComponent(cuisine)}`);
+    }
+    // City is included only when truthy; lat/lng only when both are provided.
+    if (city) params.push(`city=${encodeURIComponent(city)}`);
+    if (lat !== undefined && lng !== undefined) {
+      params.push(`lat=${lat}`, `lng=${lng}`);
+    }
+    return api<Restaurant[]>(
+      `/restaurants${params.length ? `?${params.join("&")}` : ""}`
+    );
+  },
   cuisines: () => api<string[]>("/restaurants/cuisines"),
+  cities: () =>
+    api<{ cities: string[] }>("/restaurants/cities").then((res) => res.cities),
   menu: (restaurantId: number) =>
     api<MenuItem[]>(`/restaurants/${restaurantId}/menu`),
 };
@@ -344,10 +361,17 @@ export const ordersApi = {
       method: "PUT",
       body: JSON.stringify({ lat, lng }),
     }),
-  validatePromo: (code: string, orderTotal: number) =>
+  validatePromo: (code: string, orderTotal: number, restaurantId?: number) =>
     api<{ ok: boolean; message: string; discount: number }>(
       "/orders/promo/validate",
-      { method: "POST", body: JSON.stringify({ code, order_total: orderTotal }) }
+      {
+        method: "POST",
+        body: JSON.stringify({
+          code,
+          order_total: orderTotal,
+          restaurant_id: restaurantId,
+        }),
+      }
     ),
 };
 

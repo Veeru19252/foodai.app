@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ordersApi } from "@/lib/api";
+import { ordersApi, paymentsApi } from "@/lib/api";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import StatusBadge from "@/components/StatusBadge";
 
@@ -14,6 +14,8 @@ interface DriverOrder {
   order_status: string;
   pickup_time?: string | null;
   delivered_time?: string | null;
+  payment_method?: string;
+  payment_status?: string;
 }
 
 interface Earnings {
@@ -79,6 +81,30 @@ export default function DriverPage() {
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start delivery");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function completeDelivery(orderId: number) {
+    setBusyId(orderId);
+    try {
+      await ordersApi.updateStatus(orderId, "DELIVERED");
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not complete delivery");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function collectCash(orderId: number) {
+    setBusyId(orderId);
+    try {
+      await paymentsApi.codConfirm(orderId);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not collect cash");
     } finally {
       setBusyId(null);
     }
@@ -213,8 +239,27 @@ export default function DriverPage() {
                     Navigate
                   </Link>
                   <ShareLocationButton orderId={d.order_id} />
+                  <button
+                    onClick={() => completeDelivery(d.order_id)}
+                    disabled={busyId === d.order_id}
+                    className="inline-block rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-card disabled:opacity-60"
+                  >
+                    {busyId === d.order_id ? "Updating…" : "Mark delivered"}
+                  </button>
                 </div>
               )}
+
+              {d.order_status === "DELIVERED" &&
+                d.payment_method === "COD" &&
+                d.payment_status === "PENDING" && (
+                  <button
+                    onClick={() => collectCash(d.order_id)}
+                    disabled={busyId === d.order_id}
+                    className="mt-3 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    {busyId === d.order_id ? "Updating…" : "Collect cash (₹)"}
+                  </button>
+                )}
 
               {d.order_status === "DELIVERED" && (
                 <p className="mt-3 text-sm font-medium text-emerald-400">

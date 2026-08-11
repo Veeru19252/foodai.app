@@ -13,7 +13,8 @@ management, offer, and analytics dashboards. These are registered before the
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+import tracking
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -44,7 +45,12 @@ def _review_summary(db: Session) -> dict:
     }
 
 
-def _restaurant_payload(restaurant: Restaurant, summary: dict) -> dict:
+def _restaurant_payload(
+    restaurant: Restaurant,
+    summary: dict,
+    distance_km: Optional[float] = None,
+    eta_min: Optional[float] = None,
+) -> dict:
     review = summary.get(restaurant.id, {"reviews_rating": 0.0, "review_count": 0})
     return {
         "id": restaurant.id,
@@ -57,6 +63,8 @@ def _restaurant_payload(restaurant: Restaurant, summary: dict) -> dict:
         "city": restaurant.city,
         "lat": restaurant.lat,
         "lng": restaurant.lng,
+        "distance_km": round(distance_km, 2) if distance_km is not None else None,
+        "eta_min": round(eta_min, 1) if eta_min is not None else None,
     }
 
 
@@ -94,6 +102,9 @@ def _offer_payload(promo: PromoCode, own_id: int) -> dict:
 def list_restaurants(
     cuisine: Optional[str] = None,
     q: Optional[str] = None,
+    city: Optional[str] = None,
+    lat: Optional[float] = Query(None, ge=-90.0, le=90.0),
+    lng: Optional[float] = Query(None, ge=-180.0, le=180.0),
     db: Session = Depends(get_db),
 ):
     query = db.query(Restaurant)
@@ -103,8 +114,34 @@ def list_restaurants(
         query = query.filter(
             Restaurant.name.ilike(f"%{q}%") | Restaurant.cuisine.ilike(f"%{q}%")
         )
+    if city:
+        # Case-insensitive exact city match (ilike would treat %/_ as wildcards).
+        query = query.filter(func.lower(Restaurant.city) == city.lower())
     restaurants = query.order_by(Restaurant.rating.desc()).all()
     summary = _review_summary(db)
+
+    if lat is not None and lng is not None:
+        # Nearest-first by straight-line distance; restaurants missing
+        # coordinates keep null distance_km/eta_min and sort last.
+        rows = []
+        for r in restaurants:
+            distance_km, eta_min = None, None
+            if r.lat is not None and r.lng is not None:
+                distance_km, eta_min = tracking.compute_distance_eta(
+                    r.lat, r.lng, lat, lng
+                )
+            rows.append((r, distance_km, eta_min))
+        rows.sort(
+            key=lambda row: (
+                row[1] is None,
+                row[1] if row[1] is not None else float("inf"),
+            )
+        )
+        return [
+            _restaurant_payload(r, summary, distance_km, eta_min)
+            for r, distance_km, eta_min in rows
+        ]
+
     return [_restaurant_payload(r, summary) for r in restaurants]
 
 
@@ -315,6 +352,13 @@ def my_analytics(user: User = Depends(restaurant_only), db: Session = Depends(ge
 def list_cuisines(db: Session = Depends(get_db)):
     cuisines = sorted({c for (c,) in db.query(Restaurant.cuisine).distinct()})
     return cuisines
+
+
+@router.get("/cities")
+def list_cities(db: Session = Depends(get_db)):
+    """Distinct restaurant cities, alphabetically (nulls excluded)."""
+    cities = sorted({c for (c,) in db.query(Restaurant.city).distinct() if c})
+    return {"cities": cities}
 
 
 @router.get("/{restaurant_id}/menu", response_model=list[MenuItemOut])

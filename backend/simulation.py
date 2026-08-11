@@ -143,6 +143,23 @@ def _advance_delivery(db, delivery: Delivery) -> Optional[dict]:
     if delivered:
         delivery.delivered_time = datetime.utcnow()
         order.status = "DELIVERED"
+        try:
+            # Lazy import: notifications imports this module at the top, so a
+            # module-level import here would be circular. Notify the customer
+            # that their food has arrived (same message the manual status
+            # endpoint sends).
+            from backend.routers.notifications import notify
+
+            notify(
+                db,
+                order.customer_id,
+                "order_update",
+                f"Order #{order.id} Delivered",
+                "Your order has been delivered. Enjoy!",
+                order.id,
+            )
+        except Exception:  # notification must never break the sim loop
+            logger.exception("failed to notify delivered order %s", order.id)
     db.commit()
     return {
         "type": "delivered" if delivered else "position",

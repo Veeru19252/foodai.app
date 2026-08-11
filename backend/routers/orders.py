@@ -7,7 +7,7 @@ server-side menu (never from the client), and promo logic is a parity port of
 database.py (validate_promo_code / calculate_discount / increment usage).
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
 
 import tracking
@@ -78,13 +78,25 @@ def _promo_payload(promo: PromoCode) -> dict:
     }
 
 
-def validate_promo_code(db: Session, code: str, order_total: float):
-    """Return (ok, message, promo_or_None), mirroring database.py semantics."""
+def validate_promo_code(
+    db: Session, code: str, order_total: float, restaurant_id: Optional[int] = None
+):
+    """Return (ok, message, promo_or_None), mirroring database.py semantics.
+
+    Restaurant-scoped promos (``restaurant_id`` set) only apply to that
+    restaurant; platform-wide promos (``restaurant_id`` NULL) apply anywhere.
+    """
     promo = db.query(PromoCode).filter(PromoCode.code == code).first()
     if promo is None:
         return False, "Invalid promo code.", None
     if not promo.active:
         return False, "This promo code is no longer active.", None
+    if (
+        promo.restaurant_id is not None
+        and restaurant_id is not None
+        and promo.restaurant_id != restaurant_id
+    ):
+        return False, "This promo code is not valid for this restaurant.", None
     if promo.valid_until is not None:
         valid_until = promo.valid_until
         if isinstance(valid_until, str):
@@ -169,7 +181,9 @@ def validate_promo(
     user: User = Depends(customer_only),
     db: Session = Depends(get_db),
 ):
-    ok, message, promo = validate_promo_code(db, payload.code, payload.order_total)
+    ok, message, promo = validate_promo_code(
+        db, payload.code, payload.order_total, payload.restaurant_id
+    )
     discount = calculate_discount(promo, payload.order_total) if promo else 0.0
     return PromoApplyResponse(ok=ok, message=message, discount=discount)
 
@@ -270,6 +284,8 @@ def driver_orders(user: User = Depends(security.require_roles("delivery")), db: 
             "order_status": order.status,
             "pickup_time": d.pickup_time,
             "delivered_time": d.delivered_time,
+            "payment_method": order.payment_method,
+            "payment_status": order.payment_status,
         })
     return result
 
@@ -361,8 +377,18 @@ def _require_pre_order_verification(payload: CreateOrderRequest) -> None:
         )
 
 
-def _create_single_order(db: Session, user: User, payload: CreateOrderRequest) -> Order:
-    """Create one order for a restaurant group (shared by single + batch)."""
+def _create_single_order(
+    db: Session,
+    user: User,
+    payload: CreateOrderRequest,
+    apply_delivery_fee: bool = True,
+) -> Order:
+    """Create one order for a restaurant group (shared by single + batch).
+
+    ``apply_delivery_fee`` is False for every group after the first in a
+    multi-restaurant cart so the customer is charged exactly the one delivery
+    fee the checkout page shows (per-cart, not per-restaurant).
+    """
     restaurant = db.query(Restaurant).filter(Restaurant.id == payload.restaurant_id).first()
     if restaurant is None:
         raise HTTPException(status_code=404, detail="Restaurant not found.")
@@ -383,7 +409,9 @@ def _create_single_order(db: Session, user: User, payload: CreateOrderRequest) -
     discount = 0.0
     promo = None
     if payload.coupon_code:
-        ok, message, promo = validate_promo_code(db, payload.coupon_code, subtotal)
+        ok, message, promo = validate_promo_code(
+            db, payload.coupon_code, subtotal, payload.restaurant_id
+        )
         if not ok:
             raise HTTPException(status_code=400, detail=message)
         discount = calculate_discount(promo, subtotal)
@@ -396,15 +424,26 @@ def _create_single_order(db: Session, user: User, payload: CreateOrderRequest) -
     if payload.scheduled_for is not None:
         scheduled_at = payload.scheduled_for
         if isinstance(scheduled_at, str):
-            scheduled_at = datetime.fromisoformat(scheduled_at)
+            raw = scheduled_at
+            if raw.endswith("Z"):
+                # Python 3.9's fromisoformat rejects the 'Z' suffix; JS sends it.
+                raw = raw[:-1] + "+00:00"
+            scheduled_at = datetime.fromisoformat(raw)
+        if scheduled_at.tzinfo is not None:
+            # Normalize to naive UTC for the DB's timestamp column, then
+            # compare against a naive UTC clock.
+            scheduled_at = scheduled_at.astimezone(timezone.utc).replace(tzinfo=None)
         if scheduled_at < datetime.utcnow():
             raise HTTPException(status_code=400, detail="Scheduled time must be in the future.")
         scheduled_for = scheduled_at
 
+    delivery_fee = surge["delivery_fee"] if apply_delivery_fee else 0.0
+    total = max(0.0, subtotal - discount) + delivery_fee
+
     order = Order(
         customer_id=user.id,
         restaurant_id=payload.restaurant_id,
-        total=max(0.0, subtotal - discount),
+        total=round(total, 2),
         coupon_code=payload.coupon_code,
         discount_amount=discount,
         delivery_lat=payload.delivery_lat,
@@ -416,7 +455,7 @@ def _create_single_order(db: Session, user: User, payload: CreateOrderRequest) -
         delivery_state=payload.delivery_state,
         delivery_pincode=payload.delivery_pincode,
         scheduled_for=scheduled_for,
-        delivery_fee=surge["delivery_fee"],
+        delivery_fee=delivery_fee,
         surge_multiplier=surge["surge_multiplier"],
         status="PLACED",
         phone_verified=True,
@@ -466,7 +505,10 @@ def create_orders_batch(
     db: Session = Depends(get_db),
 ):
     """Create one order per restaurant group in a single cart (Swiggy-style)."""
-    orders = [_create_single_order(db, user, req) for req in payload.orders]
+    orders = [
+        _create_single_order(db, user, req, apply_delivery_fee=(idx == 0))
+        for idx, req in enumerate(payload.orders)
+    ]
     for order in orders:
         if order.restaurant is not None and order.restaurant.user_id:
             notify(
@@ -508,19 +550,27 @@ def reorder_order(
             )
 
     subtotal = sum(menu[oi.menu_item_id].price * oi.quantity for oi in source.items)
+    # Reorders are a fresh order: re-resolve today's surge fee and default to
+    # COD. Copying a RAZORPAY method would leave the reorder unpaid forever
+    # (the reorder endpoint has no payment-intent flow), and skipping the fee
+    # would silently give free delivery.
+    surge = surge_state()
+    total = round(subtotal + surge["delivery_fee"], 2)
     order = Order(
         customer_id=user.id,
         restaurant_id=source.restaurant_id,
-        total=round(subtotal, 2),
+        total=total,
         delivery_lat=source.delivery_lat,
         delivery_lng=source.delivery_lng,
         delivery_address=source.delivery_address,
-        payment_method=source.payment_method,
+        payment_method="COD",
         delivery_phone=source.delivery_phone,
         delivery_city=source.delivery_city,
         delivery_state=source.delivery_state,
         delivery_pincode=source.delivery_pincode,
         status="PLACED",
+        delivery_fee=surge["delivery_fee"],
+        surge_multiplier=surge["surge_multiplier"],
         # Repeat order: the customer already verified this phone + location.
         phone_verified=True,
         location_confirmed=True,
@@ -661,7 +711,12 @@ def update_order_status(
         if not (is_restaurant_owner or is_admin):
             raise HTTPException(status_code=403, detail="Only the restaurant can update this order.")
     else:
-        if not (is_restaurant_owner or is_admin):
+        # The assigned driver can complete the trip (money/keys already in
+        # hand); everything else stays restaurant/admin-only.
+        allowed = is_restaurant_owner or is_admin
+        if payload.status == "DELIVERED":
+            allowed = allowed or is_assigned_driver
+        if not allowed:
             raise HTTPException(status_code=403, detail="You cannot update this order.")
 
     order.status = payload.status

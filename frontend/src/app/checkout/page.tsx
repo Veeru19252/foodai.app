@@ -138,7 +138,11 @@ export default function CheckoutPage() {
     // Promos apply to the first restaurant's order in a multi-restaurant cart.
     const primarySubtotal = groups[0]?.subtotal ?? 0;
     try {
-      const res = await ordersApi.validatePromo(promo.trim(), primarySubtotal);
+      const res = await ordersApi.validatePromo(
+        promo.trim(),
+        primarySubtotal,
+        groups[0]?.restaurant_id
+      );
       setPromoMessage(res.message);
       setPromoDiscount(res.ok ? res.discount : 0);
     } catch (err) {
@@ -189,19 +193,23 @@ export default function CheckoutPage() {
 
       // Razorpay (test mode): create the intent, simulate the client-side
       // signature, then verify it against the backend (real HMAC-SHA256).
+      // Every order in a multi-restaurant cart needs its own intent, or all
+      // but the first stay stuck PENDING forever.
       if (paymentMethod === "RAZORPAY") {
-        const intent = await paymentsApi.razorpayOrder(order.id);
-        const mockPaymentId = `pay_${Math.random().toString(36).slice(2, 10)}`;
-        const signature = await simulateRazorpaySignature(
-          intent.razorpay_order_id,
-          mockPaymentId
-        );
-        await paymentsApi.razorpayVerify({
-          order_id: order.id,
-          razorpay_order_id: intent.razorpay_order_id,
-          razorpay_payment_id: mockPaymentId,
-          razorpay_signature: signature,
-        });
+        for (const o of res.orders) {
+          const intent = await paymentsApi.razorpayOrder(o.id);
+          const mockPaymentId = `pay_${Math.random().toString(36).slice(2, 10)}`;
+          const signature = await simulateRazorpaySignature(
+            intent.razorpay_order_id,
+            mockPaymentId
+          );
+          await paymentsApi.razorpayVerify({
+            order_id: o.id,
+            razorpay_order_id: intent.razorpay_order_id,
+            razorpay_payment_id: mockPaymentId,
+            razorpay_signature: signature,
+          });
+        }
       }
 
       clear();

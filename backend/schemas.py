@@ -29,6 +29,10 @@ class TokenResponse(BaseModel):
     user: dict
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
 # ---- phone OTP (pre-order verification) ----
 
 class OtpRequest(BaseModel):
@@ -54,6 +58,9 @@ class OtpVerifyResponse(BaseModel):
     otp_token: Optional[str] = None
     phone: Optional[str] = None
     message: str = ""
+    # Present (same shape as the login/register user payload) when the caller
+    # is authenticated; null for guest OTP verification.
+    user: Optional[dict] = None
 
 
 # ---- restaurants ----
@@ -74,6 +81,9 @@ class RestaurantOut(BaseModel):
     city: Optional[str] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
+    # Geo browse: filled when the caller passes ?lat=..&lng=.., null otherwise.
+    distance_km: Optional[float] = None
+    eta_min: Optional[float] = None
     menu: List[MenuItemOut] = []
 
 
@@ -192,6 +202,7 @@ class AssignDeliveryRequest(BaseModel):
 class PromoApplyRequest(BaseModel):
     code: str
     order_total: float
+    restaurant_id: Optional[int] = None
 
 
 class PromoApplyResponse(BaseModel):

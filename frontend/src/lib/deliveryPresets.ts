@@ -55,17 +55,24 @@ export const DELIVERY_PRESETS: DeliveryPreset[] = [
 ];
 
 // City centre anchors used to pan the checkout map when a city is selected.
-export const CITY_CENTERS: Record<string, [number, number]> = {
-  Bengaluru: [12.9716, 77.5946],
-  "New Delhi": [28.6139, 77.209],
-  Mumbai: [19.076, 72.8777],
-  Hyderabad: [17.385, 78.4867],
-  Chennai: [13.0827, 80.2707],
-  Kolkata: [22.5726, 88.3639],
-  Pune: [18.5204, 73.8567],
-  Jaipur: [26.9124, 75.7873],
-  Ahmedabad: [23.0225, 72.5714],
-};
+// The first preset per city defines its centre so the map lands on a known
+// delivery area.
+
+/** Derive one centre point per city from the first preset that mentions it. */
+export function cityCentersFromPresets(
+  presets: DeliveryPreset[]
+): Record<string, [number, number]> {
+  const centers: Record<string, [number, number]> = {};
+  for (const preset of presets) {
+    if (!(preset.city in centers)) {
+      centers[preset.city] = [preset.lat, preset.lng];
+    }
+  }
+  return centers;
+}
+
+export const CITY_CENTERS: Record<string, [number, number]> =
+  cityCentersFromPresets(DELIVERY_PRESETS);
 
 export const DEFAULT_CITY = "Bengaluru";
 export const DEFAULT_PRESET = DELIVERY_PRESETS[0];

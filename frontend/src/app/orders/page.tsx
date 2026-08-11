@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ordersApi, paymentsApi, trackingApi } from "@/lib/api";
+import { ordersApi, trackingApi } from "@/lib/api";
 import type { OrderBrief, Receipt, TrackingState } from "@/lib/types";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import StatusBadge from "@/components/StatusBadge";
@@ -119,19 +119,6 @@ export default function OrdersPage() {
   const cancellable = (o: OrderBrief) =>
     o.status === "PLACED" || o.status === "CONFIRMED";
 
-  async function markCodCollected(orderId: number) {
-    setBusyId(orderId);
-    try {
-      await paymentsApi.codConfirm(orderId);
-      setError("");
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update payment");
-    } finally {
-      setBusyId(null);
-    }
-  }
-
   return (
     <ProtectedRoute role="customer">
       <h1 className="mb-6 text-2xl font-bold">My orders</h1>
@@ -239,16 +226,6 @@ export default function OrdersPage() {
                       {busyId === o.id ? "Reordering…" : "Order again"}
                     </button>
                   )}
-                  {o.payment_method === "COD" &&
-                    o.payment_status === "PENDING" && (
-                      <button
-                        onClick={() => markCodCollected(o.id)}
-                        disabled={busyId === o.id}
-                        className="text-sm font-semibold text-emerald-400 hover:underline disabled:opacity-60"
-                      >
-                        {busyId === o.id ? "Updating…" : "Mark COD collected"}
-                      </button>
-                    )}
                   <button
                     onClick={() => openReceipt(o)}
                     className="text-sm font-semibold text-secondary hover:underline"

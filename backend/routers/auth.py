@@ -26,6 +26,7 @@ from backend.schemas import (
     OtpRequestResponse,
     OtpVerifyRequest,
     OtpVerifyResponse,
+    RefreshRequest,
     RegisterRequest,
     TokenResponse,
 )
@@ -127,12 +128,13 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-def refresh(refresh_token: str, db: Session = Depends(get_db)):
-    payload = security.decode_token(refresh_token)
-    if payload is None:
+def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
+    token = payload.refresh_token
+    parsed = security.decode_token(token)
+    if parsed is None:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
     try:
-        user_id = int(payload["sub"])
+        user_id = int(parsed["sub"])
     except (KeyError, TypeError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid refresh token.")
     user = db.query(User).filter(User.id == user_id).first()
@@ -251,4 +253,12 @@ def otp_verify(
             db.commit()
 
     token = security.create_otp_token(phone)
-    return OtpVerifyResponse(ok=True, otp_token=token, phone=phone, message="Phone verified.")
+    return OtpVerifyResponse(
+        ok=True,
+        otp_token=token,
+        phone=phone,
+        message="Phone verified.",
+        # Reuse the login/register serialization helper so the shape matches
+        # exactly. For guests user is None (optional-auth dependency).
+        user=_user_dict(user) if user is not None else None,
+    )

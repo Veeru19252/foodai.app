@@ -34,6 +34,13 @@ BENGALURU_CENTER = (12.9716, 77.5946)
 # Assumed average delivery-vehicle speed for ETA estimates (km/h).
 AVG_SPEED_KMH = 25.0
 
+# Road-distance factor: a straight-line distance is multiplied by this to
+# approximate the longer road distance a rider actually travels.
+ROAD_FACTOR = 1.4
+
+# Fixed kitchen prep/assembly buffer added to every delivery ETA (minutes).
+PREP_BUFFER_MIN = 10.0
+
 # Plausible coordinates keyed by restaurant_id (1-15) — one branch per major
 # Indian city so the demo is pan-India. Order matches backend/seed.py
 # RESTAURANTS: 1=Spice Garden, 2=Dosa Plaza, 3=Wok This Way, 4=Pizza Junction,
@@ -281,6 +288,26 @@ def compute_eta(
     progress = min(1.0, max(0.0, progress))
     remaining_km = (1.0 - progress) * route_length_km(route)
     return math.ceil(remaining_km / avg_speed_kmh * 60)
+
+
+def compute_distance_eta(
+    restaurant_lat: float,
+    restaurant_lng: float,
+    user_lat: float,
+    user_lng: float,
+) -> tuple[float, float]:
+    """Return (distance_km, eta_min) from a restaurant to a delivery point.
+
+    ``distance_km`` is the great-circle (straight-line) distance. ``eta_min``
+    is a realistic delivery estimate: travel time over the expected road
+    distance (straight-line distance x ROAD_FACTOR) at AVG_SPEED_KMH plus a
+    fixed PREP_BUFFER_MIN for kitchen prep/assembly. Pure and unit-testable.
+    """
+    distance_km = haversine_km((restaurant_lat, restaurant_lng), (user_lat, user_lng))
+    road_km = distance_km * ROAD_FACTOR
+    travel_min = road_km / AVG_SPEED_KMH * 60.0
+    eta_min = travel_min + PREP_BUFFER_MIN
+    return distance_km, eta_min
 
 
 def format_eta(minutes: int) -> str:

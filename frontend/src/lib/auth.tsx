@@ -23,6 +23,7 @@ interface AuthContextValue {
     role: string
   ) => Promise<User>;
   logout: () => void;
+  updateUser: (partial: Partial<User>) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -64,9 +65,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(null);
   }, []);
 
+  const updateUser = useCallback(
+    (partial: Partial<User>) => {
+      if (!user) return;
+      const merged = { ...user, ...partial };
+      setUser(merged);
+      // Same key and JSON shape saveAuth uses to persist the user (api.ts).
+      window.localStorage.setItem("foodai_user", JSON.stringify(merged));
+    },
+    [user]
+  );
+
   const value = useMemo(
-    () => ({ user, token, loading, login, register, logout }),
-    [user, token, loading, login, register, logout]
+    () => ({ user, token, loading, login, register, logout, updateUser }),
+    [user, token, loading, login, register, logout, updateUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

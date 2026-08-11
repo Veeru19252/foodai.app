@@ -64,6 +64,62 @@ def test_cuisine_filter(client):
     assert names == ["Wok This Way"]
 
 
+def test_city_filter(client):
+    resp = client.get("/restaurants?city=Bengaluru")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body
+    assert all(r["city"] == "Bengaluru" for r in body)
+    # Case-insensitive: same restaurants either way.
+    lower = client.get("/restaurants?city=bengaluru").json()
+    assert [r["id"] for r in lower] == [r["id"] for r in body]
+
+
+def test_city_filter_combined_with_cuisine(client):
+    resp = client.get("/restaurants?city=Bengaluru&cuisine=Chinese")
+    names = [r["name"] for r in resp.json()]
+    assert names == ["Wok This Way"]
+
+
+def test_lat_lng_returns_distance_eta_sorted(client):
+    # Demo home near Indiranagar; Bengaluru spots must rank ahead of the
+    # rest of India by straight-line distance.
+    resp = client.get("/restaurants?lat=12.9719&lng=77.6412")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body
+    for r in body:
+        assert r["distance_km"] is not None and r["distance_km"] >= 0
+        assert r["eta_min"] is not None and r["eta_min"] > 0
+    distances = [r["distance_km"] for r in body]
+    assert distances == sorted(distances)
+    assert body[0]["city"] == "Bengaluru"
+
+
+def test_no_lat_lng_keeps_null_geo_fields(client):
+    resp = client.get("/restaurants")
+    assert resp.status_code == 200
+    for r in resp.json():
+        assert r["distance_km"] is None
+        assert r["eta_min"] is None
+
+
+def test_invalid_lat_lng_rejected_422(client):
+    assert client.get("/restaurants?lat=95&lng=77").status_code == 422
+    assert client.get("/restaurants?lat=12&lng=200").status_code == 422
+    assert client.get("/restaurants?lat=abc&lng=77").status_code == 422
+
+
+def test_restaurants_cities_endpoint(client):
+    resp = client.get("/restaurants/cities")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body) == {"cities"}
+    cities = body["cities"]
+    assert cities == sorted(cities)
+    assert "Bengaluru" in cities
+
+
 def test_menu_for_restaurant(client):
     resp = client.get("/restaurants/1/menu")
     assert resp.status_code == 200
@@ -89,8 +145,9 @@ def test_create_order_with_promo(client):
     )
     assert resp.status_code == 201
     order = resp.json()
-    # 2 * 220 + 200 = 640; WELCOME10 = 10% capped at 50 -> total 590.
-    assert order["total"] == 590.0
+    # 2 * 220 + 200 = 640; WELCOME10 = 10% capped at 50 -> food subtotal 590
+    # + the ₹25 delivery fee is now charged on the order total.
+    assert order["total"] == 615.0
     assert order["discount_amount"] == 50.0
     assert order["status"] == "PLACED"
     assert len(order["items"]) == 2
@@ -677,10 +734,14 @@ def test_create_batch_order(client):
     assert resp.status_code == 201
     orders = resp.json()["orders"]
     assert len(orders) == 2
-    # Restaurant 1: 2 * 220 = 440; WELCOME10 = 10% (44, below cap 50) -> 396.
+    # Restaurant 1: 2 * 220 = 440; WELCOME10 = 10% (44, below cap 50) -> 396
+    # + ₹25 delivery fee on the first (primary) batch order only.
     assert orders[0]["restaurant_id"] == 1
-    assert orders[0]["total"] == 396.0
+    assert orders[0]["total"] == 421.0
+    assert orders[0]["delivery_fee"] == 25.0
+    # Secondary restaurant in the batch: no extra delivery fee.
     assert orders[1]["restaurant_id"] == 2
+    assert orders[1]["delivery_fee"] == 0.0
     return [o["id"] for o in orders], headers
 
 
@@ -716,10 +777,26 @@ def test_otp_request_and_verify(client):
     assert verified["phone"] == "9876500001"
     assert verified["otp_token"]
 
+    # Authenticated callers get their freshly-stamped profile back in the
+    # same shape as the login/register user payload.
+    assert verified["user"] is not None
+    assert verified["user"]["phone"] == "9876500001"
+    assert verified["user"]["phone_verified_at"] is not None
+
     # Verifying stamps the customer's profile so checkout can pre-fill.
     me = client.get("/auth/me", headers=headers).json()
     assert me["phone"] == "9876500001"
     assert me["phone_verified_at"] is not None
+
+
+def test_otp_verify_guest_returns_null_user(client):
+    resp = client.post("/auth/otp/request", json={"phone": "9876500006"})
+    assert resp.status_code == 200
+    code = resp.json()["dev_code"]
+    resp = client.post("/auth/otp/verify", json={"phone": "9876500006", "code": code})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert resp.json()["user"] is None
 
 
 def test_otp_wrong_code_rejected(client):

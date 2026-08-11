@@ -54,9 +54,15 @@ def retrain_forecast(
     from backend import ml_train
 
     try:
-        return ml_train.retrain_forecast()
+        result = ml_train.retrain_forecast()
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    # The forecast endpoints read the model through lru_cached loaders; drop
+    # the cached copies so the freshly-written joblib actually takes effect
+    # (otherwise "Retrain" silently keeps serving the old model).
+    forecast_service.load_model.cache_clear()
+    forecast_service.load_meta.cache_clear()
+    return result
 
 
 def _parse_point(value: Optional[str]) -> Optional[tuple[float, float]]:

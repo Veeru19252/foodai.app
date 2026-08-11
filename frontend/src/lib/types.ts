@@ -32,6 +32,8 @@ export interface OtpVerifyResponse {
   otp_token?: string | null;
   phone?: string | null;
   message?: string;
+  /** The verified user when a logged-in customer verifies, else null. */
+  user?: User | null;
 }
 
 /** Body for a single /orders create (also used inside /orders/batch). */
@@ -66,6 +68,10 @@ export interface Restaurant {
   city?: string | null;
   lat?: number | null;
   lng?: number | null;
+  /** Distance to the requested lat/lng — null when no location was sent. */
+  distance_km?: number | null;
+  /** Estimated delivery time — null when no location was sent. */
+  eta_min?: number | null;
 }
 
 export interface MenuItem {

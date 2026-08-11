@@ -56,3 +56,31 @@ def test_preset_coordinates_known():
 def test_preset_coordinates_unknown_raises():
     with pytest.raises(ValueError):
         tracking.preset_coordinates("not-a-place")
+
+
+def test_compute_distance_eta_known():
+    # Spice Garden (MG Road) -> demo home (near Indiranagar): a few km.
+    distance_km, eta_min = tracking.compute_distance_eta(
+        12.975, 77.606, 12.9719, 77.6412
+    )
+    assert 3.0 < distance_km < 8.0
+    # ETA = road distance / speed + prep buffer, strictly above the buffer.
+    assert eta_min > tracking.PREP_BUFFER_MIN
+    assert eta_min == pytest.approx(
+        distance_km * tracking.ROAD_FACTOR / tracking.AVG_SPEED_KMH * 60
+        + tracking.PREP_BUFFER_MIN
+    )
+
+
+def test_compute_distance_eta_zero():
+    distance_km, eta_min = tracking.compute_distance_eta(12.97, 77.59, 12.97, 77.59)
+    assert distance_km == pytest.approx(0.0)
+    assert eta_min == pytest.approx(tracking.PREP_BUFFER_MIN)
+
+
+def test_compute_distance_eta_is_symmetric():
+    a = (12.975, 77.606)
+    b = (12.9719, 77.6412)
+    d1, _ = tracking.compute_distance_eta(*a, *b)
+    d2, _ = tracking.compute_distance_eta(*b, *a)
+    assert d1 == pytest.approx(d2)

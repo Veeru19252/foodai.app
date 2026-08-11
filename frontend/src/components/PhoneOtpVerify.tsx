@@ -14,11 +14,14 @@
 
 import { useState } from "react";
 import { authApi } from "@/lib/api";
+import type { User } from "@/lib/types";
 
 interface PhoneOtpVerifyProps {
   /** Pre-filled mobile from the customer's last verified number. */
   defaultPhone?: string | null;
   onVerified: (phone: string, otpToken: string) => void;
+  /** Optional: receives the freshly verified User when the caller was logged in. */
+  onVerifiedUser?: (user: User) => void;
   onError?: (message: string) => void;
 }
 
@@ -27,6 +30,7 @@ const PHONE_RE = /^[6-9]\d{9}$/;
 export default function PhoneOtpVerify({
   defaultPhone,
   onVerified,
+  onVerifiedUser,
   onError,
 }: PhoneOtpVerifyProps) {
   const [phone, setPhone] = useState(defaultPhone ?? "");
@@ -80,6 +84,7 @@ export default function PhoneOtpVerify({
       const res = await authApi.otpVerify(normalized, code.trim());
       if (res.ok && res.otp_token) {
         onVerified(normalized, res.otp_token);
+        if (res.user) onVerifiedUser?.(res.user);
       } else {
         setError(res.message || "Verification failed. Please try again.");
       }
