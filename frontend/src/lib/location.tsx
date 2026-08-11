@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
+import type { ReactNode } from "react";
 
 /** Delivery location selected by the user, persisted across sessions. */
 export interface DeliveryLocation {
@@ -56,8 +63,20 @@ export interface DeliveryLocationState {
   setLocation: (location: DeliveryLocation | null) => void;
 }
 
-/** React hook backed by localStorage for the user's delivery location. */
-export function useDeliveryLocation(): DeliveryLocationState {
+/**
+ * Shared delivery-location state. Backed by localStorage so the selection
+ * survives reloads, but exposed through React context so every consumer
+ * (OnboardingGate, Navbar, restaurants page, checkout) sees the same value.
+ */
+const DeliveryLocationContext = createContext<DeliveryLocationState | undefined>(
+  undefined
+);
+
+export function DeliveryLocationProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const [location, setLocationState] = useState<DeliveryLocation | null>(
     loadDeliveryLocation
   );
@@ -67,5 +86,25 @@ export function useDeliveryLocation(): DeliveryLocationState {
     setLocationState(next);
   }, []);
 
-  return { location, setLocation };
+  const value = useMemo(
+    () => ({ location, setLocation }),
+    [location, setLocation]
+  );
+
+  return (
+    <DeliveryLocationContext.Provider value={value}>
+      {children}
+    </DeliveryLocationContext.Provider>
+  );
+}
+
+/** React hook backed by localStorage for the user's delivery location. */
+export function useDeliveryLocation(): DeliveryLocationState {
+  const ctx = useContext(DeliveryLocationContext);
+  if (!ctx) {
+    throw new Error(
+      "useDeliveryLocation must be used within DeliveryLocationProvider"
+    );
+  }
+  return ctx;
 }

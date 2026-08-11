@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { CartProvider } from "@/lib/cart";
+import { DeliveryLocationProvider } from "@/lib/location";
 import Navbar from "@/components/Navbar";
 import OnboardingGate from "@/components/OnboardingGate";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
@@ -27,10 +28,12 @@ export default function RootLayout({
       <body className="min-h-screen">
           <AuthProvider>
             <CartProvider>
-              <Navbar />
-              <OnboardingGate />
-              <ServiceWorkerRegister />
-              <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+              <DeliveryLocationProvider>
+                <Navbar />
+                <OnboardingGate />
+                <ServiceWorkerRegister />
+                <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+              </DeliveryLocationProvider>
             </CartProvider>
           </AuthProvider>
       </body>
