@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { completeCheckoutGate } from "./helpers";
+import { completeCheckoutGate, completeOnboarding } from "./helpers";
 
 /**
  * Role-based dashboards: restaurant sees incoming orders and dispatches them;
@@ -15,6 +15,7 @@ test("restaurant dispatches an order and admin sees the dashboard", async ({
   await customer.getByLabel("Email").fill("customer@foodai.com");
   await customer.getByLabel("Password").fill("password123");
   await customer.getByRole("button", { name: "Log in" }).click();
+  await completeOnboarding(customer);
   await customer.getByText("Dosa Plaza").first().click();
   await customer.getByRole("button", { name: "ADD" }).first().click();
   await customer.getByRole("link", { name: "View cart →" }).click();

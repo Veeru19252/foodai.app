@@ -27,6 +27,7 @@ import {
   PaymentMethodPicker,
   type PaymentMethod,
 } from "@/components/PaymentMethodPicker";
+import { useDeliveryLocation } from "@/lib/location";
 
 // Test-mode Razorpay secret — matches backend/routers/payments.py
 // RAZORPAY_KEY_SECRET fallback. In production the Razorpay Checkout SDK
@@ -53,6 +54,7 @@ async function simulateRazorpaySignature(orderId: string, paymentId: string): Pr
 export default function CheckoutPage() {
   const router = useRouter();
   const { user } = useAuth();
+  const { location } = useDeliveryLocation();
   const { items, groups, subtotal, clear } = useCart();
   const [promo, setPromo] = useState("");
   const [promoMessage, setPromoMessage] = useState("");
@@ -93,6 +95,16 @@ export default function CheckoutPage() {
       .then(setSaved)
       .catch(() => setSaved([]));
   }, []);
+
+  // Prefill the delivery form from the location chosen on the restaurants
+  // page; the phone is already seeded from the verified profile.
+  useEffect(() => {
+    if (!location) return;
+    setCity(location.city);
+    setStateName(STATE_BY_CITY[location.city] ?? "");
+    setAddress(location.address);
+    setPoint({ lat: location.lat, lng: location.lng, address: location.address });
+  }, [location]);
 
   function applyAddress(s: SavedAddress) {
     setAddress(s.address);

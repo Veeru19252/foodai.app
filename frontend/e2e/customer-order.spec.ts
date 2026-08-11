@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { completeOnboarding } from "./helpers";
 
 /**
  * Full customer journey: login → browse two restaurants → build a
@@ -14,6 +15,10 @@ test("customer places a multi-restaurant order and sees live tracking", async ({
   await page.getByLabel("Password").fill("password123");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page).toHaveURL(/\/restaurants/);
+
+  // 1b. First-run onboarding gate: pick the delivery location (and verify
+  //     the phone if the shared DB hasn't stamped the customer yet).
+  await completeOnboarding(page);
 
   // 2. Browse restaurants — Spice Garden should be visible
   //    (.first(): the AI recommendation row also shows it above the grid)

@@ -145,10 +145,12 @@ def test_create_order_with_promo(client):
     )
     assert resp.status_code == 201
     order = resp.json()
-    # 2 * 220 + 200 = 640; WELCOME10 = 10% capped at 50 -> food subtotal 590
-    # + the ₹25 delivery fee is now charged on the order total.
-    assert order["total"] == 615.0
+    # 2 * 220 + 200 = 640; WELCOME10 = 10% capped at 50 -> food subtotal 590.
+    # The delivery fee is surge-dependent (₹25 base, up to ₹37.5), so the
+    # total is asserted against the fee the server actually charged.
     assert order["discount_amount"] == 50.0
+    assert 25.0 <= order["delivery_fee"] <= 37.5
+    assert order["total"] == round(590.0 + order["delivery_fee"], 2)
     assert order["status"] == "PLACED"
     assert len(order["items"]) == 2
     return order["id"], token
@@ -734,11 +736,12 @@ def test_create_batch_order(client):
     assert resp.status_code == 201
     orders = resp.json()["orders"]
     assert len(orders) == 2
-    # Restaurant 1: 2 * 220 = 440; WELCOME10 = 10% (44, below cap 50) -> 396
-    # + ₹25 delivery fee on the first (primary) batch order only.
+    # Restaurant 1: 2 * 220 = 440; WELCOME10 = 10% (44, below cap 50) -> 396.
+    # The delivery fee is surge-dependent (₹25 base, up to ₹37.5) and is only
+    # charged on the first (primary) batch order.
     assert orders[0]["restaurant_id"] == 1
-    assert orders[0]["total"] == 421.0
-    assert orders[0]["delivery_fee"] == 25.0
+    assert 25.0 <= orders[0]["delivery_fee"] <= 37.5
+    assert orders[0]["total"] == round(396.0 + orders[0]["delivery_fee"], 2)
     # Secondary restaurant in the batch: no extra delivery fee.
     assert orders[1]["restaurant_id"] == 2
     assert orders[1]["delivery_fee"] == 0.0
