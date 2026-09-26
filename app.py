@@ -39,7 +39,7 @@ st.set_page_config(
     page_title="FoodAI",
     page_icon="🍔",
     layout="wide",
-    initial_sidebar_state="collapse",
+    initial_sidebar_state="extended",
 )
 
 
