@@ -11,6 +11,12 @@ import random
 os.environ["DATABASE_URL"] = (
     "postgresql+psycopg2://foodai:foodai_pass@127.0.0.1:5432/foodai_test"
 )
+# The whole suite shares one TestClient IP and a handful of demo emails, so the
+# production login/OTP throttles would trip on legitimate test traffic. Raise
+# them here; the dedicated rate-limit test lowers them again via monkeypatch.
+os.environ.setdefault("LOGIN_MAX_ATTEMPTS", "100000")
+os.environ.setdefault("LOGIN_IP_MAX_ATTEMPTS", "100000")
+os.environ.setdefault("OTP_VERIFY_MAX_ATTEMPTS", "100000")
 
 import pytest
 from fastapi.testclient import TestClient

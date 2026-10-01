@@ -14,10 +14,10 @@ from hashlib import sha256
 from random import SystemRandom
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from backend import config, security
+from backend import config, rate_limit, security
 from backend.db import get_db
 from backend.models import OtpCode, User, VALID_ROLES  # noqa: F401  (VALID_ROLES re-exported)
 from backend.schemas import (
@@ -68,6 +68,14 @@ def _validate_phone(phone: str) -> str:
             detail="Enter a valid 10-digit Indian mobile number.",
         )
     return normalized
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP, honouring a proxy's X-Forwarded-For header."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 def _generate_otp() -> str:
@@ -140,13 +148,39 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email.lower().strip()).first()
+def login(
+    payload: LoginRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    email = payload.email.lower().strip()
+    ip = _client_ip(request)
+    # Two buckets: per-IP stops one host spraying many accounts, per-email
+    # stops distributed guessing of a single account. Both are checked before
+    # the password so a throttled attacker learns nothing about the account.
+    for bucket, limit in (
+        (f"login:ip:{ip}", config.LOGIN_IP_MAX_ATTEMPTS),
+        (f"login:email:{email}", config.LOGIN_MAX_ATTEMPTS),
+    ):
+        allowed, retry_after = rate_limit.hit(
+            db, bucket, limit=limit, window_seconds=config.LOGIN_WINDOW_SECONDS
+        )
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many login attempts. Please try again later.",
+                headers={"Retry-After": str(retry_after)},
+            )
+    user = db.query(User).filter(User.email == email).first()
     if user is None or not security.verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password.",
         )
+    # A successful login clears the per-email counter so a legitimate user is
+    # never locked out by their own earlier typos. The per-IP counter is left
+    # alone so an attacker cannot reset it by logging into their own account.
+    rate_limit.reset(db, f"login:email:{email}")
     # Transparently upgrade legacy SHA-256 hashes to Argon2id on a successful
     # login, so existing accounts migrate without a forced password reset.
     if security.needs_rehash(user.password_hash):
@@ -235,6 +269,21 @@ def otp_verify(
     """
     phone = _validate_phone(payload.phone)
     code = payload.code.strip()
+
+    # Per-phone throttle on top of the per-code attempt cap: without it an
+    # attacker can burn through many codes by requesting a fresh OTP each time.
+    allowed, retry_after = rate_limit.hit(
+        db,
+        f"otp:verify:{phone}",
+        limit=config.OTP_VERIFY_MAX_ATTEMPTS,
+        window_seconds=config.OTP_VERIFY_WINDOW_SECONDS,
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many verification attempts. Please try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
 
     now = datetime.utcnow()
     otp = (

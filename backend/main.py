@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend import config, idempotency, simulation
+from backend import config, idempotency, rate_limit, simulation
 from backend.db import Base, SessionLocal, engine
 from backend import models  # noqa: F401  (register tables on Base.metadata)
 from backend import seed
@@ -50,9 +50,12 @@ async def lifespan(app: FastAPI):
             removed = idempotency.purge_expired(db)
             if removed:
                 logger.info("purged %d expired idempotency keys", removed)
+            stale = rate_limit.purge_old(db)
+            if stale:
+                logger.info("purged %d stale rate-limit windows", stale)
         except Exception:
             # A failed sweep must never stop the API from starting.
-            logger.exception("idempotency purge failed; continuing")
+            logger.exception("startup purge failed; continuing")
     finally:
         db.close()
     simulation.MAIN_LOOP = asyncio.get_running_loop()

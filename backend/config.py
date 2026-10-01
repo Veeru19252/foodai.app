@@ -76,6 +76,16 @@ OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "60")
 # the code is only ever sent to the phone and never echoed or logged.
 OTP_DEV_MODE = _env_flag("OTP_DEV_MODE", default=not IS_PRODUCTION)
 
+# Login throttling (fixed window, DB-backed). Per-email is tight; per-IP is
+# looser so a shared NAT does not lock out legitimate users.
+LOGIN_MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
+LOGIN_IP_MAX_ATTEMPTS = int(os.getenv("LOGIN_IP_MAX_ATTEMPTS", "20"))
+LOGIN_WINDOW_SECONDS = int(os.getenv("LOGIN_WINDOW_SECONDS", "300"))
+
+# OTP verification throttling per phone, on top of the per-code attempt cap.
+OTP_VERIFY_MAX_ATTEMPTS = int(os.getenv("OTP_VERIFY_MAX_ATTEMPTS", "10"))
+OTP_VERIFY_WINDOW_SECONDS = int(os.getenv("OTP_VERIFY_WINDOW_SECONDS", "300"))
+
 # CORS origins for the dev frontend (Next.js dev server) and the legacy
 # Streamlit app while it still runs during the transition.
 CORS_ORIGINS = os.getenv(

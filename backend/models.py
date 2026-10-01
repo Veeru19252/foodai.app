@@ -290,6 +290,35 @@ class IdempotencyRecord(Base):
     )
 
 
+class RateLimitCounter(Base):
+    """Fixed-window counter backing login/OTP throttling.
+
+    One row per ``(bucket, window_start)``. The bucket names what is being
+    limited (e.g. ``login:ip:1.2.3.4`` or ``login:email:foo@bar``) and the
+    window is the start of the fixed interval. Incrementing is a single atomic
+    upsert, so concurrent attempts cannot race past the limit -- the same
+    database-as-concurrency-control idea as the idempotency guard.
+
+    Kept in the database rather than an in-process dict so the limit survives
+    a restart and is shared across uvicorn workers.
+    """
+
+    __tablename__ = "rate_limit_counters"
+
+    id = Column(Integer, primary_key=True)
+    bucket = Column(String(255), nullable=False)
+    window_start = Column(DateTime, nullable=False)
+    count = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "bucket", "window_start", name="uq_rate_limit_bucket_window"
+        ),
+        # Supports purge_old(): old windows are swept at startup.
+        Index("ix_rate_limit_counters_window_start", "window_start"),
+    )
+
+
 class SavedAddress(Base):
     __tablename__ = "saved_addresses"
 
