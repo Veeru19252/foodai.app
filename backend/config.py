@@ -121,10 +121,29 @@ elif IS_PRODUCTION and (not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET):
 
 # CORS origins for the dev frontend (Next.js dev server) and the legacy
 # Streamlit app while it still runs during the transition.
-CORS_ORIGINS = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:3000,http://localhost:8501,http://127.0.0.1:3000,http://127.0.0.1:8501",
-).split(",")
+_LOCAL_CORS_ORIGINS = (
+    "http://localhost:3000,http://localhost:8501,"
+    "http://127.0.0.1:3000,http://127.0.0.1:8501"
+)
+
+if IS_PRODUCTION and "CORS_ORIGINS" not in os.environ:
+    # The local defaults only ever match a developer's own machine, so a
+    # production deploy that forgets this would start up and then reject every
+    # request from its own deployed frontend (which is served from a real
+    # domain, not localhost) -- a confusing failure that looks like a proxy
+    # problem. Fail fast with the variable name instead, matching the
+    # JWT_SECRET and Razorpay guards above.
+    raise RuntimeError(
+        "CORS_ORIGINS must be set to the deployed frontend's origin(s) when "
+        "ENVIRONMENT=production, e.g. CORS_ORIGINS=https://foodai.onrender.com. "
+        "It is required because the built-in defaults are localhost-only."
+    )
+
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", _LOCAL_CORS_ORIGINS).split(",")
+    if origin.strip()
+]
 
 # --- Simulation --------------------------------------------------------
 # How often the delivery simulator advances active deliveries (seconds).
