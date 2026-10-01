@@ -219,8 +219,10 @@ export default function DriverPage() {
                 </p>
               )}
 
-              {(d.order_status === "PREPARING" ||
-                d.order_status === "CONFIRMED") && (
+              {/* Only a PREPARING order can be dispatched: the lifecycle has no
+                  CONFIRMED -> OUT_FOR_DELIVERY edge, so offering the button
+                  earlier would just hand the rider a 400. */}
+              {d.order_status === "PREPARING" && (
                 <button type="button"
                   onClick={() => startDelivery(d.order_id)}
                   disabled={busyId === d.order_id}
@@ -228,6 +230,13 @@ export default function DriverPage() {
                 >
                   {busyId === d.order_id ? "Starting…" : "Start delivery"}
                 </button>
+              )}
+
+              {d.order_status === "CONFIRMED" && (
+                <p className="mt-3 text-xs text-faint">
+                  Waiting for the restaurant to start preparing — you can dispatch
+                  once the order is marked preparing.
+                </p>
               )}
 
               {d.order_status === "OUT_FOR_DELIVERY" && (
