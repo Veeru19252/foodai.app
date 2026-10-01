@@ -115,6 +115,15 @@ class Order(Base):
     payment_method = Column(String(16), nullable=False, default="COD")
     payment_status = Column(String(16), nullable=False, default="PENDING")
     payment_id = Column(String(64), nullable=True)
+    # Razorpay intent binding. The provider order id is minted server-side and
+    # persisted so verify() can prove the client is settling *this* order's
+    # intent, not an arbitrary one. The amount is frozen at intent time so a
+    # price change between intent and verify cannot be exploited.
+    payment_provider_order_id = Column(String(128), nullable=True)
+    payment_amount_paise = Column(Integer, nullable=True)
+    payment_currency = Column(String(8), nullable=True)
+    payment_created_at = Column(DateTime, nullable=True)
+    payment_verified_at = Column(DateTime, nullable=True)
     delivery_lat = Column(Float, nullable=True)
     delivery_lng = Column(Float, nullable=True)
     delivery_address = Column(String(255), nullable=True)
@@ -143,6 +152,13 @@ class Order(Base):
     restaurant = relationship("Restaurant")
     assigned_driver = relationship("User", foreign_keys=[delivery_id])
     items = relationship("OrderItem", back_populates="order")
+
+    __table_args__ = (
+        # A provider payment id may settle at most one order, so a captured
+        # payment cannot be replayed against a second order. NULLs (COD and
+        # unpaid orders) are exempt under PostgreSQL's unique semantics.
+        UniqueConstraint("payment_id", name="uq_orders_payment_id"),
+    )
 
 
 class OrderItem(Base):

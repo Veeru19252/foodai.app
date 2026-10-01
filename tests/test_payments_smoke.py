@@ -206,3 +206,109 @@ def test_payment_status_visible_on_order_list(client):
     row = next(o for o in orders if o["id"] == order["id"])
     assert row["payment_method"] == "RAZORPAY"
     assert row["payment_status"] == "PENDING"
+
+
+# ---- intent binding / replay guards ----
+
+def _intent(client, headers, order_id):
+    resp = client.post(
+        "/payments/razorpay/order", json={"order_id": order_id}, headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _verify(client, headers, order_id, razorpay_order_id, payment_id, signature):
+    return client.post(
+        "/payments/razorpay/verify",
+        json={
+            "order_id": order_id,
+            "razorpay_order_id": razorpay_order_id,
+            "razorpay_payment_id": payment_id,
+            "razorpay_signature": signature,
+        },
+        headers=headers,
+    )
+
+
+def test_razorpay_intent_is_bound_to_order(client):
+    token = login(client, "customer@foodai.com")["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    order_a = _create_order(client, token, "RAZORPAY")
+    order_b = _create_order(client, token, "RAZORPAY")
+    intent_a = _intent(client, headers, order_a["id"])
+    _intent(client, headers, order_b["id"])
+
+    # A signature valid for A's intent must not settle B.
+    payment_id = "pay_bind_1"
+    signature = _razorpay_signature(intent_a["razorpay_order_id"], payment_id)
+    resp = _verify(
+        client, headers, order_b["id"], intent_a["razorpay_order_id"], payment_id, signature
+    )
+    assert resp.status_code == 400, resp.text
+    assert "does not match" in resp.json()["detail"]
+
+
+def test_razorpay_payment_id_cannot_be_replayed(client):
+    token = login(client, "customer@foodai.com")["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    order_a = _create_order(client, token, "RAZORPAY")
+    order_b = _create_order(client, token, "RAZORPAY")
+    intent_a = _intent(client, headers, order_a["id"])
+    intent_b = _intent(client, headers, order_b["id"])
+
+    payment_id = "pay_replay_1"
+    sig_a = _razorpay_signature(intent_a["razorpay_order_id"], payment_id)
+    resp = _verify(
+        client, headers, order_a["id"], intent_a["razorpay_order_id"], payment_id, sig_a
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["payment_status"] == "PAID"
+
+    # The same captured payment id cannot settle a second order.
+    sig_b = _razorpay_signature(intent_b["razorpay_order_id"], payment_id)
+    resp = _verify(
+        client, headers, order_b["id"], intent_b["razorpay_order_id"], payment_id, sig_b
+    )
+    assert resp.status_code == 400, resp.text
+    assert "already been used" in resp.json()["detail"]
+
+
+def test_razorpay_amount_change_rejected(client):
+    from backend.db import SessionLocal
+    from backend.models import Order
+
+    token = login(client, "customer@foodai.com")["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    order = _create_order(client, token, "RAZORPAY")
+    intent = _intent(client, headers, order["id"])
+
+    # Simulate a price change between intent creation and verification.
+    db = SessionLocal()
+    try:
+        row = db.query(Order).filter(Order.id == order["id"]).first()
+        row.total = row.total + 100
+        db.commit()
+    finally:
+        db.close()
+
+    payment_id = "pay_amt_1"
+    signature = _razorpay_signature(intent["razorpay_order_id"], payment_id)
+    resp = _verify(
+        client, headers, order["id"], intent["razorpay_order_id"], payment_id, signature
+    )
+    assert resp.status_code == 400, resp.text
+    assert "amount changed" in resp.json()["detail"]
+
+
+def test_razorpay_verify_without_intent_rejected(client):
+    token = login(client, "customer@foodai.com")["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    order = _create_order(client, token, "RAZORPAY")
+
+    # No intent was created for this order.
+    payment_id = "pay_nointent_1"
+    signature = _razorpay_signature("order_fake_1", payment_id)
+    resp = _verify(client, headers, order["id"], "order_fake_1", payment_id, signature)
+    assert resp.status_code == 400, resp.text
+    assert "No payment intent" in resp.json()["detail"]

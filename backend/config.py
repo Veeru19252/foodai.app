@@ -93,6 +93,27 @@ SEED_DEMO_DATA = _env_flag("SEED_DEMO_DATA", default=not IS_PRODUCTION)
 # seeding refuses to run in production with the default value.
 DEMO_USER_PASSWORD = os.getenv("DEMO_USER_PASSWORD", "password123")
 
+# --- Payments (Razorpay) ----------------------------------------------
+# Test mode simulates the Razorpay Checkout SDK locally and is the default
+# outside production. With it off, real keys are required and the app refuses
+# to start without them, so a production deploy can never fall back to the
+# public demo secret.
+PAYMENTS_TEST_MODE = _env_flag("PAYMENTS_TEST_MODE", default=not IS_PRODUCTION)
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
+RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
+
+if PAYMENTS_TEST_MODE:
+    # Demo credentials so the local flow works with no external account. These
+    # are deliberately public and only ever used while test mode is on.
+    RAZORPAY_KEY_ID = RAZORPAY_KEY_ID or "rzp_test_FoodAI_demo"
+    RAZORPAY_KEY_SECRET = RAZORPAY_KEY_SECRET or "foodai_demo_secret"
+elif IS_PRODUCTION and (not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET):
+    raise RuntimeError(
+        "RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are required when "
+        "PAYMENTS_TEST_MODE is off in production."
+    )
+
 # CORS origins for the dev frontend (Next.js dev server) and the legacy
 # Streamlit app while it still runs during the transition.
 CORS_ORIGINS = os.getenv(

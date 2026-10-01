@@ -29,10 +29,9 @@ import {
 } from "@/components/PaymentMethodPicker";
 import { useDeliveryLocation } from "@/lib/location";
 
-// Test-mode Razorpay secret — matches backend/routers/payments.py
-// RAZORPAY_KEY_SECRET fallback. In production the Razorpay Checkout SDK
-// produces the signature; here we simulate it so verify() exercises the
-// real HMAC-SHA256 algorithm end to end.
+// Test-mode Razorpay secret. Only used when the backend reports
+// test_mode: true (PAYMENTS_TEST_MODE, off in production); in live mode the
+// Razorpay Checkout SDK produces the signature in the browser instead.
 const TEST_RAZORPAY_SECRET = "foodai_demo_secret";
 
 async function simulateRazorpaySignature(orderId: string, paymentId: string): Promise<string> {
@@ -226,6 +225,11 @@ export default function CheckoutPage() {
       if (paymentMethod === "RAZORPAY") {
         for (const o of res.orders) {
           const intent = await paymentsApi.razorpayOrder(o.id);
+          if (!intent.test_mode) {
+            // Live mode: the Razorpay Checkout SDK produces the signature in
+            // the browser. This demo build only ships the test-mode path.
+            throw new Error("Razorpay live mode is not configured in this build.");
+          }
           const mockPaymentId = `pay_${Math.random().toString(36).slice(2, 10)}`;
           const signature = await simulateRazorpaySignature(
             intent.razorpay_order_id,
