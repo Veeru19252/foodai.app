@@ -581,6 +581,66 @@ def test_driver_earnings(client):
     assert resp.status_code == 403
 
 
+def test_driver_earnings_distance_is_capped(client):
+    """A far-away delivery point cannot inflate the driver's payout."""
+    from datetime import datetime
+
+    from backend.db import SessionLocal
+    from backend.models import Delivery, Order
+    from backend.routers.orders import (
+        MAX_EARNINGS_DISTANCE_KM,
+        PER_DELIVERY_RATE,
+        PER_KM_RATE,
+    )
+
+    # ~500 km from the restaurant: far beyond any real delivery.
+    gate = _gate(
+        client,
+        delivery_lat=17.0,
+        delivery_lng=78.0,
+        location_confirm_lat=17.0,
+        location_confirm_lng=78.0,
+    )
+    resp = client.post(
+        "/orders",
+        json={"restaurant_id": 1, "items": [_line(1, 1)], **gate},
+        headers=_customer_headers(client),
+    )
+    assert resp.status_code == 201, resp.text
+    order_id = resp.json()["id"]
+
+    rest_token = login(client, "spice@foodai.com")["access_token"]
+    drivers = client.get(
+        "/orders/drivers", headers={"Authorization": f"Bearer {rest_token}"}
+    ).json()
+    driver = next(d for d in drivers if d["email"] == "rider@foodai.com")
+    client.post(
+        f"/orders/{order_id}/assign",
+        json={"driver_id": driver["id"]},
+        headers={"Authorization": f"Bearer {rest_token}"},
+    )
+
+    db = SessionLocal()
+    try:
+        d = db.query(Delivery).filter(Delivery.order_id == order_id).first()
+        d.delivered_time = datetime.utcnow()
+        db.query(Order).filter(Order.id == order_id).update({"status": "DELIVERED"})
+        db.commit()
+    finally:
+        db.close()
+
+    driver_token = login(client, "rider@foodai.com")["access_token"]
+    body = client.get(
+        "/orders/driver/earnings",
+        headers={"Authorization": f"Bearer {driver_token}"},
+    ).json()
+    row = next(r for r in body["recent"] if r["order_id"] == order_id)
+    assert row["distance_km"] == MAX_EARNINGS_DISTANCE_KM
+    assert row["earned"] == round(
+        PER_DELIVERY_RATE + PER_KM_RATE * MAX_EARNINGS_DISTANCE_KM, 2
+    )
+
+
 def test_restaurant_menu_management(client):
     owner_token = login(client, "spice@foodai.com")["access_token"]
     owner_headers = {"Authorization": f"Bearer {owner_token}"}

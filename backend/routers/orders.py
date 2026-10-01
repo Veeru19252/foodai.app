@@ -292,6 +292,10 @@ def driver_orders(user: User = Depends(security.require_roles("delivery")), db: 
 
 PER_DELIVERY_RATE = 60.0
 PER_KM_RATE = 12.0
+# Driver pay is distance-based, but the delivery destination is supplied by
+# the customer at checkout. Cap the billable distance so a customer cannot
+# inflate a driver's earnings by claiming an absurdly distant drop-off.
+MAX_EARNINGS_DISTANCE_KM = 30.0
 
 
 @router.get("/driver/earnings")
@@ -300,7 +304,12 @@ def driver_earnings(
     db: Session = Depends(get_db),
 ):
     """Driver earnings dashboard: flat rate per delivered order plus a
-    distance-based top-up, computed from completed deliveries only."""
+    distance-based top-up, computed from completed deliveries only.
+
+    The distance is the planned route from the restaurant to the delivery
+    point, clamped to ``MAX_EARNINGS_DISTANCE_KM`` so a customer-supplied
+    destination cannot inflate the payout.
+    """
     deliveries = (
         db.query(Delivery)
         .filter(Delivery.driver_id == user.id)
@@ -318,7 +327,9 @@ def driver_earnings(
             _route, distance_km = order_route(order)
         except ValueError:
             distance_km = 1.0
-        distance_km = max(distance_km, 1.0)
+        # Clamp to a sane range: at least 1 km, and never more than the cap,
+        # so a customer-supplied destination cannot inflate the payout.
+        distance_km = min(max(distance_km, 1.0), MAX_EARNINGS_DISTANCE_KM)
         earned = PER_DELIVERY_RATE + PER_KM_RATE * distance_km
         if d.delivered_time is not None:
             total_earned += earned
