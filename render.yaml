@@ -9,6 +9,14 @@
 #
 # The URLs below assume the service names are kept exactly as written. If Render
 # assigns a different URL, update NEXT_PUBLIC_API_URL + CORS_ORIGINS to match.
+#
+# ENVIRONMENT=production is what engages backend/config.py's fail-fast guards.
+# It is set on the backend service below, so the deploy refuses to start rather
+# than running with development defaults (demo seeding, OTP codes in responses,
+# the public default JWT secret).
+#
+# Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in the Render dashboard to enable
+# real checkout; with them absent the backend will not boot in production.
 
 databases:
   - name: foodai-db
@@ -27,6 +35,12 @@ services:
     startCommand: alembic upgrade head && uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
+      # Without this the backend treats a public deploy as development: it
+      # seeds password123 demo accounts, echoes OTP codes in the response, and
+      # accepts the public default JWT secret. Every guard in backend/config.py
+      # keys off ENVIRONMENT, so it has to be set here.
+      - key: ENVIRONMENT
+        value: "production"
       - key: DATABASE_URL
         fromDatabase:
           name: foodai-db
@@ -37,6 +51,13 @@ services:
         generateValue: true
       - key: PYTHON_VERSION
         value: "3.9"
+      # Real checkout needs merchant keys. Until they exist, the backend's own
+      # production guard refuses to boot rather than falling back to the public
+      # demo Razorpay secret, so PAYMENTS_TEST_MODE is left off deliberately.
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
 
   - type: web
     name: foodai-frontend
