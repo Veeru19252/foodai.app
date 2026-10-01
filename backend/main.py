@@ -13,11 +13,14 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from backend import config, idempotency, rate_limit, simulation, token_store
-from backend.db import Base, SessionLocal, engine
+from backend.db import Base, SessionLocal, engine, get_db
 from backend import models  # noqa: F401  (register tables on Base.metadata)
 from backend import seed
 from backend.routers import (
@@ -104,5 +107,28 @@ app.include_router(notifications.router)
 
 
 @app.get("/api/health")
-def health():
-    return {"status": "ok", "service": "foodai-backend"}
+def health(db: Session = Depends(get_db)):
+    """Liveness plus a real database round-trip.
+
+    A health check that never touches the database reports "ok" while every
+    actual request 500s, which is the worst possible failure mode: the
+    orchestrator keeps the instance in rotation and the alarm never fires.
+    Render's free Postgres expires its data after 30 days, so this is a
+    reachable state rather than a theoretical one.
+
+    Returns 503 when the database is unreachable so the platform can take the
+    instance out of rotation. The probe is a cheap SELECT 1, and
+    ``pool_pre_ping`` makes this work against a connection that was dropped
+    while idle.
+    """
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        # Log the cause but keep the response body free of driver detail,
+        # which can include the connection URL.
+        logger.error("health check failed: database unreachable: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="Database unreachable.",
+        )
+    return {"status": "ok", "service": "foodai-backend", "database": "ok"}
