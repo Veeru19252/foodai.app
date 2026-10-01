@@ -301,6 +301,20 @@ def driver_orders(user: User = Depends(security.require_roles("delivery")), db: 
     return result
 
 
+def _route_distance_km(
+    restaurant_point, order
+) -> float:
+    """Road distance for an order, from already-selected restaurant coordinates.
+
+    Mirrors ``tracking_state.order_route`` but takes the restaurant point as an
+    argument so the caller can supply it from its own query. Passing it
+    separately keeps the earnings loop from triggering a lazy load of
+    ``order.restaurant`` on every row.
+    """
+    _route, distance_km = order_route(order, restaurant_point)
+    return distance_km
+
+
 PER_DELIVERY_RATE = 60.0
 PER_KM_RATE = 12.0
 # Driver pay is distance-based, but the delivery destination is supplied by
@@ -321,21 +335,48 @@ def driver_earnings(
     point, clamped to ``MAX_EARNINGS_DISTANCE_KM`` so a customer-supplied
     destination cannot inflate the payout.
     """
-    deliveries = (
-        db.query(Delivery)
+    # Eager-load the order and the two names read below. This previously ran
+    # db.query(Order) inside the loop, so a driver with a long history cost one
+    # query per delivery (measured 301 queries for 100 deliveries) even though
+    # only the ten most recent rows are returned. Delivery has no `order`
+    # relationship, so the join is explicit and Order is chained from there.
+    # One query, with the order and both names selected alongside the delivery.
+    # This previously ran db.query(Order) inside the loop, so a driver with a
+    # long history cost one query per delivery (measured 301 queries for 100
+    # deliveries) even though only the ten most recent rows are returned.
+    # outerjoin throughout: the counts below come from the Delivery rows, so a
+    # delivery whose order is missing must still be counted.
+    # Restaurant coordinates are selected too: order_route reads the restaurant
+    # row through a lazy relationship, which was a second query per delivery.
+    # delivery_end needs no join because both points are columns on the order.
+    rows = (
+        db.query(
+            Delivery,
+            Order,
+            Restaurant.name,
+            Restaurant.lat,
+            Restaurant.lng,
+            User.name,
+        )
+        .outerjoin(Order, Order.id == Delivery.order_id)
+        .outerjoin(Restaurant, Restaurant.id == Order.restaurant_id)
+        .outerjoin(User, User.id == Order.customer_id)
         .filter(Delivery.driver_id == user.id)
         .order_by(Delivery.id.desc())
         .all()
     )
-    completed = [d for d in deliveries if d.delivered_time is not None]
+    own_deliveries = [d for d, _o, _rn, _rlat, _rlng, _un in rows]
+    completed = [d for d in own_deliveries if d.delivered_time is not None]
     recent = []
     total_earned = 0.0
-    for d in deliveries:
-        order = db.query(Order).filter(Order.id == d.order_id).first()
+    for d, order, restaurant_name, rest_lat, rest_lng, customer_name in rows:
         if order is None:
             continue
         try:
-            _route, distance_km = order_route(order)
+            distance_km = _route_distance_km(
+                (rest_lat, rest_lng) if rest_lat is not None and rest_lng is not None else None,
+                order,
+            )
         except ValueError:
             distance_km = 1.0
         # Clamp to a sane range: at least 1 km, and never more than the cap,
@@ -347,8 +388,8 @@ def driver_earnings(
         recent.append({
             "delivery_id": d.id,
             "order_id": order.id,
-            "restaurant_name": order.restaurant.name if order.restaurant else "",
-            "customer_name": order.customer.name if order.customer else "",
+            "restaurant_name": restaurant_name or "",
+            "customer_name": customer_name or "",
             "distance_km": round(distance_km, 2),
             "earned": round(earned, 2) if d.delivered_time else 0.0,
             "completed_at": d.delivered_time,
@@ -357,10 +398,10 @@ def driver_earnings(
         "per_delivery_rate": PER_DELIVERY_RATE,
         "per_km_rate": PER_KM_RATE,
         "total_earnings": round(total_earned, 2),
-        "total_deliveries": len(deliveries),
+        "total_deliveries": len(own_deliveries),
         "completed_deliveries": len(completed),
         "active_deliveries": sum(
-            1 for d in deliveries if d.pickup_time is not None and d.delivered_time is None
+            1 for d in own_deliveries if d.pickup_time is not None and d.delivered_time is None
         ),
         "recent": recent[:10],
     }

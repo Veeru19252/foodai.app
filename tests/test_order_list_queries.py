@@ -18,6 +18,8 @@ or customer would hide the bug and make the query-count test vacuous.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 from sqlalchemy import event
 from sqlalchemy.orm import Session
@@ -112,6 +114,117 @@ class RestaurantUser:
     def __init__(self, id: int):
         self.id = id
         self.role = "restaurant"
+
+
+class DriverUser:
+    def __init__(self, id: int):
+        self.id = id
+        self.role = "delivery"
+
+
+@pytest.fixture
+def driver_history():
+    """One driver with N delivered orders, each from a distinct restaurant.
+
+    Every order carries real coordinates so the earnings computation takes the
+    database path through restaurant lat/lng. Distinct restaurants matter: a
+    shared restaurant would let the identity map absorb the lazy load and hide
+    the N+1 this test exists to catch.
+    """
+    db = SessionLocal()
+    n = 30
+    driver = User(
+        email="nplus_drv@example.com", name="NPlusDrv", password_hash="x", role="delivery"
+    )
+    db.add(driver)
+    db.flush()
+    customers, restaurants = [], []
+    for i in range(n):
+        c = User(
+            email=f"nplus_dc{i}@example.com", name=f"NDC{i}", password_hash="x", role="customer"
+        )
+        db.add(c)
+        customers.append(c)
+    db.flush()
+    for i in range(n):
+        r = Restaurant(
+            user_id=driver.id,
+            name=f"NEDiner {i}",
+            address="a",
+            cuisine="test",
+            lat=13.0 + i * 0.001,
+            lng=80.0,
+        )
+        db.add(r)
+        restaurants.append(r)
+    db.flush()
+    orders = []
+    for i in range(n):
+        o = Order(
+            customer_id=customers[i].id,
+            restaurant_id=restaurants[i].id,
+            status="DELIVERED",
+            total=10.0 + i,
+            delivery_address="somewhere",
+            delivery_city="Chennai",
+            delivery_lat=13.05,
+            delivery_lng=80.02,
+        )
+        db.add(o)
+        orders.append(o)
+    db.flush()
+    now = datetime(2026, 10, 1, 12, 0, 0)
+    for o in orders:
+        db.add(Delivery(order_id=o.id, driver_id=driver.id, delivered_time=now))
+    db.commit()
+    yield db, n, driver.id
+    try:
+        order_ids = [o.id for o in orders]
+        db.query(Delivery).filter(Delivery.order_id.in_(order_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Order).filter(Order.id.in_(order_ids)).delete(synchronize_session=False)
+        db.query(Restaurant).filter(Restaurant.name.like("NEDiner %")).delete(
+            synchronize_session=False
+        )
+        db.query(User).filter(User.email.like("nplus_%")).delete(
+            synchronize_session=False
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_driver_earnings_does_not_issue_a_query_per_delivery(driver_history):
+    """A driver's history is the longest-lived list in the app.
+
+    This loop used to run its own Order query per delivery, and read the
+    restaurant through a lazy relationship for the distance calculation, so it
+    cost several queries per row. Only the ten most recent rows are rendered.
+    """
+    db, n, driver_id = driver_history
+    queries = _count_queries(
+        db, lambda: orders_router.driver_earnings(DriverUser(driver_id), db)
+    )
+    assert queries <= 2, (
+        f"driver_earnings issued {queries} queries for {n} deliveries; "
+        "the order, restaurant and customer must be selected in one query"
+    )
+
+
+def test_driver_earnings_still_totals_and_names_every_delivery(driver_history):
+    """Totals cover the whole history; only the recent list is truncated."""
+    db, n, driver_id = driver_history
+    body = orders_router.driver_earnings(DriverUser(driver_id), db)
+    assert body["total_deliveries"] == n
+    assert body["completed_deliveries"] == n
+    assert len(body["recent"]) == 10
+    assert body["total_earnings"] > 0
+    row = body["recent"][0]
+    assert row["restaurant_name"].startswith("NEDiner"), row
+    assert row["customer_name"].startswith("NDC"), row
+    # A real distance, not the 1 km fallback for an unroutable pair.
+    assert row["distance_km"] > 1.0, row
 
 
 @pytest.fixture

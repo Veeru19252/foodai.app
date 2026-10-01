@@ -26,14 +26,23 @@ def delivery_end(order: Order) -> Tuple[float, float]:
     return tracking.DEFAULT_CUSTOMER_HOME
 
 
-def restaurant_start(order: Order) -> Tuple[float, float]:
+def restaurant_start(
+    order: Order, restaurant_point: Optional[Tuple[float, float]] = None
+) -> Tuple[float, float]:
     """Return the restaurant's coordinates for an order.
 
     Prefers the pan-India location columns on the restaurant row (populated by
     seed/backfill); falls back to the pure tracking.COORDINATES dict, then the
     demo home. ``order.restaurant`` is a lazy relationship so this works even
     when only the order was loaded.
+
+    ``restaurant_point`` lets a caller that has already selected the
+    coordinates in its own query pass them in, instead of triggering a lazy
+    load per row. See the driver earnings list, which would otherwise pay a
+    query per delivery for the restaurant lookup.
     """
+    if restaurant_point is not None:
+        return restaurant_point
     restaurant = getattr(order, "restaurant", None)
     if restaurant is not None and restaurant.lat is not None and restaurant.lng is not None:
         return (restaurant.lat, restaurant.lng)
@@ -43,14 +52,16 @@ def restaurant_start(order: Order) -> Tuple[float, float]:
         return tracking.DEFAULT_CUSTOMER_HOME
 
 
-def order_route(order: Order):
+def order_route(
+    order: Order, restaurant_point: Optional[Tuple[float, float]] = None
+):
     """Return (route, distance_km) along real roads for an order.
 
     route is a tuple of (lat, lng) points; distance_km is the OSRM road
     distance (or haversine fallback). Cached per start/end pair. Restaurants
     created at runtime (no legacy coordinate) fall back to the demo home.
     """
-    start = restaurant_start(order)
+    start = restaurant_start(order, restaurant_point)
     end = delivery_end(order)
     return routing.get_route(start, end)
 
