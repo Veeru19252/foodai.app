@@ -22,6 +22,14 @@ COPY backend/ backend/
 COPY models/ models/
 COPY eta_service.py explain_service.py forecast_service.py tracking.py alembic.ini ./
 
+# Training pipeline + corpus + recorded metrics. The admin retrain endpoint
+# imports scripts/train_forecast.py and reads data/orders.csv, and the ETA
+# quality gate reads outputs/metrics_eta.json, so all three must be present
+# in the image or retraining fails and the gate has no evidence.
+COPY scripts/ scripts/
+COPY data/ data/
+COPY outputs/ outputs/
+
 EXPOSE 8000
 
 # Apply migrations, then start the API. The app seeds demo data on first boot
