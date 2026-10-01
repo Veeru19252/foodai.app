@@ -108,16 +108,24 @@ def populated_db():
 
 
 def _count_queries(db: Session, fn) -> int:
+    """Count the statements this session issues while fn runs.
+
+    Listens on the session's own Connection rather than the engine: the
+    background simulation task shares the engine and can fire a statement at
+    any moment, which would otherwise be attributed to the endpoint under test
+    and make the count flaky.
+    """
     counter = {"n": 0}
 
     def _on_execute(*_args, **_kwargs):
         counter["n"] += 1
 
-    event.listen(db.get_bind(), "before_cursor_execute", _on_execute)
+    connection = db.connection()
+    event.listen(connection, "before_cursor_execute", _on_execute)
     try:
         fn()
     finally:
-        event.remove(db.get_bind(), "before_cursor_execute", _on_execute)
+        event.remove(connection, "before_cursor_execute", _on_execute)
     return counter["n"]
 
 

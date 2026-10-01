@@ -12,7 +12,7 @@ from typing import Optional
 
 import tracking
 from fastapi import APIRouter, Depends, Header, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from backend import idempotency, order_state, security, simulation
 from backend.db import get_db
@@ -230,8 +230,13 @@ def current_surge(
 
 @router.get("")
 def my_orders(user: User = Depends(customer_only), db: Session = Depends(get_db)):
+    # _order_brief reads order.restaurant.name for every row, so leaving it
+    # lazy issued one extra SELECT per order (101 queries for 100 orders).
+    # This is the customer's own order history, so it grows with their
+    # lifetime activity rather than the table.
     orders = (
         db.query(Order)
+        .options(joinedload(Order.restaurant))
         .filter(Order.customer_id == user.id)
         .order_by(Order.id.desc())
         .all()
@@ -241,8 +246,14 @@ def my_orders(user: User = Depends(customer_only), db: Session = Depends(get_db)
 
 @router.get("/restaurant")
 def restaurant_orders(user: User = Depends(restaurant_or_admin), db: Session = Depends(get_db)):
+    # The response reads customer and assigned_driver per row, so both are
+    # eager-loaded: as lazy attributes this was one SELECT per order (101
+    # queries for 100 orders). joinedload keeps it a single query even when
+    # every order has a different customer and driver, which is the normal
+    # case for a busy restaurant.
     query = (
         db.query(Order)
+        .options(joinedload(Order.customer), joinedload(Order.assigned_driver))
         .join(Restaurant, Restaurant.id == Order.restaurant_id)
         .order_by(Order.id.desc())
     )
