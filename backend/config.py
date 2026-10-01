@@ -71,6 +71,11 @@ OTP_JWT_EXPIRE_MINUTES = int(os.getenv("OTP_JWT_EXPIRE_MINUTES", "15"))
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
 OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "60"))
 
+# Server-side pepper for OTP digests. Defaults to JWT_SECRET (already required
+# in production) so there is no new mandatory env var; set it separately to
+# rotate OTP hashes independently of session tokens.
+OTP_HASH_SECRET = os.getenv("OTP_HASH_SECRET", JWT_SECRET)
+
 # When on, /auth/otp/request returns the code in the response and logs it so
 # the flow is usable without an SMS provider. MUST be off in production, where
 # the code is only ever sent to the phone and never echoed or logged.

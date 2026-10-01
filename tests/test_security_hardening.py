@@ -114,3 +114,41 @@ def test_otp_dev_code_hidden_when_dev_mode_off(client, monkeypatch):
     body = resp.json()
     assert body["test_mode"] is False
     assert body["dev_code"] is None
+
+
+# ---- OTP digest is keyed ----
+
+def test_otp_hash_is_keyed_not_plain_sha256():
+    from backend.routers.auth import _hash_otp
+
+    code = "123456"
+    digest = _hash_otp(code)
+    assert digest != hashlib.sha256(code.encode()).hexdigest()
+    assert digest == _hash_otp(code)  # deterministic
+    assert len(digest) == 64
+
+
+def test_stored_otp_hash_is_keyed(client):
+    from backend.db import SessionLocal
+    from backend.models import OtpCode
+    from backend.routers.auth import _hash_otp
+
+    phone = _fresh_phone()
+    resp = client.post("/auth/otp/request", json={"phone": phone})
+    assert resp.status_code == 200, resp.text
+    code = resp.json()["dev_code"]
+
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(OtpCode)
+            .filter(OtpCode.phone == phone)
+            .order_by(OtpCode.id.desc())
+            .first()
+        )
+    finally:
+        db.close()
+
+    assert row is not None
+    assert row.code_hash == _hash_otp(code)
+    assert row.code_hash != hashlib.sha256(code.encode()).hexdigest()

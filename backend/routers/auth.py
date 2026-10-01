@@ -3,10 +3,12 @@ FoodAI backend - auth router
 =============================
 Register, login (JWT access + refresh), token refresh, the current-user
 profile endpoint, and the phone OTP verification gate used at checkout.
-Password hashing matches the legacy app (SHA-256) so seeded demo accounts
-keep their passwords.
+Passwords are Argon2id (legacy SHA-256 hashes still verify and upgrade on
+login); OTP codes are stored as keyed HMAC digests so a leaked database
+cannot be brute-forced over the 6-digit code space.
 """
 
+import hmac
 import logging
 import re
 from datetime import datetime, timedelta
@@ -83,7 +85,15 @@ def _generate_otp() -> str:
 
 
 def _hash_otp(code: str) -> str:
-    return sha256(code.encode()).hexdigest()
+    """Keyed digest of an OTP code.
+
+    A plain SHA-256 of a 6-digit code is brute-forceable in milliseconds if
+    the database leaks. Keying the digest with a server-side secret means an
+    attacker who only has the database cannot test guesses at all.
+    """
+    return hmac.new(
+        config.OTP_HASH_SECRET.encode(), code.encode(), sha256
+    ).hexdigest()
 
 
 def _dev_code_log(phone: str, code: str) -> None:
