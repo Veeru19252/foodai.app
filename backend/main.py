@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend import config, simulation
+from backend import config, idempotency, simulation
 from backend.db import Base, SessionLocal, engine
 from backend import models  # noqa: F401  (register tables on Base.metadata)
 from backend import seed
@@ -44,6 +44,15 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         seed.seed_if_empty(db)
+        # Sweep expired idempotency keys once at boot. Doing it here rather
+        # than per-request keeps the hot path free of a write it does not need.
+        try:
+            removed = idempotency.purge_expired(db)
+            if removed:
+                logger.info("purged %d expired idempotency keys", removed)
+        except Exception:
+            # A failed sweep must never stop the API from starting.
+            logger.exception("idempotency purge failed; continuing")
     finally:
         db.close()
     simulation.MAIN_LOOP = asyncio.get_running_loop()

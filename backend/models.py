@@ -16,9 +16,11 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -233,6 +235,59 @@ class Notification(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     user = relationship("User")
+
+
+class IdempotencyRecord(Base):
+    """Replay guard for unsafe, money-touching POSTs.
+
+    Why this exists: the classic failure is a client that sends
+    ``POST /orders``, the server commits the order, the response is lost to a
+    network timeout, and the client retries. Without a guard that is two real
+    orders, two delivery fees, and two cards charged.
+
+    Semantics (the standard idempotency-key contract):
+
+    * The key is scoped to ``(user_id, endpoint)`` -- two different users may
+      legitimately pick the same key string, and one key reused across two
+      endpoints is a client bug, not a replay.
+    * ``request_hash`` pins the key to one payload. Reusing a key with a
+      *different* body is rejected (409) rather than silently returning the
+      first response, which would hide a genuine client bug.
+    * The row is written in the **same transaction** as the orders it guards.
+      A crash therefore rolls back both together, so a retry after a crash
+      finds no row and is free to try again. There is no half-committed state.
+    * Only order IDs are stored, not a serialized response body. On replay we
+      re-read the live orders, so a retried request returns the order's
+      *current* status (PLACED, or DELIVERED by now) rather than a stale
+      snapshot frozen at creation time.
+    """
+
+    __tablename__ = "idempotency_records"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    key = Column(String(255), nullable=False)
+    endpoint = Column(String(64), nullable=False)
+    request_hash = Column(String(64), nullable=False)
+    # JSON array of created order IDs. Written in the same commit as the
+    # orders; NULL would mean "claimed but the transaction rolled back",
+    # which cannot persist because the claim shares that transaction.
+    order_ids = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        # The database is the concurrency control. Two in-flight requests with
+        # the same key both insert; the second blocks on this unique index
+        # until the first commits (then it gets a clean conflict and replays)
+        # or rolls back (then it proceeds and creates the order). This is why
+        # the guard must not be a check-then-insert in Python.
+        UniqueConstraint(
+            "user_id", "endpoint", "key", name="uq_idempotency_user_endpoint_key"
+        ),
+        # Supports purge_expired(): the table grows by one row per order, so
+        # without a sweep it becomes the largest table in the schema.
+        Index("ix_idempotency_records_created_at", "created_at"),
+    )
 
 
 class SavedAddress(Base):

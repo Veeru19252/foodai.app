@@ -270,15 +270,35 @@ export const restaurantApi = {
   analytics: () => api<RestaurantAnalytics>("/restaurants/me/analytics"),
 };
 
+/**
+ * A fresh Idempotency-Key for one user intent (one checkout attempt).
+ *
+ * Generated once per attempt and reused across every retry of that attempt,
+ * which is the whole point: api() replays a request after a 401 refresh, and a
+ * browser retry after a timeout re-invokes placeOrder. Without a stable key,
+ * any of those could place a second order.
+ *
+ * Uses crypto.randomUUID where available, falling back to a random string for
+ * non-secure contexts (plain http on a LAN IP), since the value only needs to
+ * be unique per user, not unguessable.
+ */
+export function newIdempotencyKey(): string {
+  const c = globalThis.crypto;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export const ordersApi = {
-  create: (payload: CreateOrderPayload) =>
+  create: (payload: CreateOrderPayload, idempotencyKey?: string) =>
     api<OrderDetail>("/orders", {
       method: "POST",
+      headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
       body: JSON.stringify(payload),
     }),
-  createBatch: (orders: CreateOrderPayload[]) =>
+  createBatch: (orders: CreateOrderPayload[], idempotencyKey?: string) =>
     api<{ orders: OrderDetail[] }>("/orders/batch", {
       method: "POST",
+      headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
       body: JSON.stringify({ orders }),
     }),
   surge: () => api<SurgeState>("/orders/surge"),

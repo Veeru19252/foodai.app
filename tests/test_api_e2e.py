@@ -39,6 +39,53 @@ def test_register_duplicate_email(client):
     assert resp.status_code == 409
 
 
+def test_register_cannot_escalate_to_admin(client):
+    """Public registration must never mint a privileged account.
+
+    Regression test: the register endpoint used to trust `role` from the request
+    body, so an anonymous caller could create an admin and read every
+    admin-only endpoint. Admin access must come from seeding or from an
+    authenticated admin promoting a user, never from the signup form.
+    """
+    resp = client.post(
+        "/auth/register",
+        json={"name": "Escalator", "email": "escalator@example.com", "password": "password123", "role": "admin"},
+    )
+    assert resp.status_code == 403
+
+    # No account may have been created by the rejected request...
+    assert client.post(
+        "/auth/login", json={"email": "escalator@example.com", "password": "password123"}
+    ).status_code == 401
+
+    # ...and the rejected role must not work on any other privileged role.
+    for role in ("admin",):
+        resp = client.post(
+            "/auth/register",
+            json={"name": f"Esc {role}", "email": f"esc-{role}@example.com", "password": "password123", "role": role},
+        )
+        assert resp.status_code == 403, f"role={role} was not rejected"
+
+
+def test_register_allows_legitimate_partner_roles(client):
+    """Restaurant and delivery partners are legitimate self-registrants."""
+    for role in ("customer", "restaurant", "delivery"):
+        resp = client.post(
+            "/auth/register",
+            json={"name": f"Partner {role}", "email": f"partner-{role}@example.com", "password": "password123", "role": role},
+        )
+        assert resp.status_code == 201, f"role={role} should be allowed"
+        assert resp.json()["user"]["role"] == role
+
+
+def test_register_rejects_unknown_role(client):
+    resp = client.post(
+        "/auth/register",
+        json={"name": "Bogus", "email": "bogus@example.com", "password": "password123", "role": "superadmin"},
+    )
+    assert resp.status_code == 403
+
+
 def test_login_wrong_password(client):
     resp = client.post("/auth/login", json={"email": "customer@foodai.com", "password": "nope"})
     assert resp.status_code == 401
@@ -1272,3 +1319,132 @@ def test_admin_retrain_forecast(client):
     forecast = client.get("/ml/forecast", headers={"Authorization": f"Bearer {admin_token}"})
     assert forecast.status_code == 200
     assert forecast.json()["fallback"] is False
+
+
+# ---- Order state machine ----
+
+def _make_dispatched_order(client):
+    """An order at OUT_FOR_DELIVERY with `rider@foodai.com` assigned.
+
+    Returns (order_id, restaurant_headers, driver_headers, customer_headers).
+    """
+    order_id, _h = test_create_batch_order(client)
+    oid = order_id[0]
+    rest_headers = {"Authorization": "Bearer " + login(client, "spice@foodai.com")["access_token"]}
+    driver_headers = {"Authorization": "Bearer " + login(client, "rider@foodai.com")["access_token"]}
+    rider_id = next(
+        d["id"]
+        for d in client.get("/orders/drivers", headers=rest_headers).json()
+        if d["email"] == "rider@foodai.com"
+    )
+    client.post(
+        f"/orders/{oid}/assign", json={"driver_id": rider_id}, headers=rest_headers
+    )
+    resp = client.patch(
+        f"/orders/{oid}/status",
+        json={"status": "OUT_FOR_DELIVERY"},
+        headers=driver_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    return oid, rest_headers, driver_headers, _customer_headers(client)
+
+
+def test_cancelled_order_cannot_be_resurrected(client):
+    """A cancelled order must not be re-dispatched, delivered, or paid.
+
+    This is the bug that motivated the state machine: the simulation loop
+    advances any OUT_FOR_DELIVERY order to DELIVERED, so a cancelled order
+    could be "delivered" and billed.
+    """
+    order_id, _h = test_create_batch_order(client)
+    oid = order_id[0]
+    customer = _customer_headers(client)
+    resp = client.post(f"/orders/{oid}/cancel", headers=customer)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "CANCELLED"
+
+    for target in ("OUT_FOR_DELIVERY", "DELIVERED", "PLACED", "CONFIRMED"):
+        resp = client.patch(
+            f"/orders/{oid}/status", json={"status": target}, headers=customer
+        )
+        assert resp.status_code == 400, f"{target} should be refused on a CANCELLED order"
+        assert "final state" in resp.json()["detail"]
+
+
+def test_delivered_order_is_final(client):
+    """DELIVERED has no outgoing edges in the lifecycle graph."""
+    oid, _rest, driver, _customer = _make_dispatched_order(client)
+    resp = client.patch(
+        f"/orders/{oid}/status", json={"status": "DELIVERED"}, headers=driver
+    )
+    assert resp.status_code == 200, resp.text
+    for target in ("PLACED", "CONFIRMED", "PREPARING", "OUT_FOR_DELIVERY"):
+        resp = client.patch(
+            f"/orders/{oid}/status", json={"status": target}, headers=driver
+        )
+        assert resp.status_code == 400, f"{target} should be refused on a DELIVERED order"
+
+
+def test_cannot_skip_backwards_in_lifecycle(client):
+    """DELIVERED -> PLACED and PREPARING -> PLACED are not edges."""
+    oid, rest, _driver, _customer = _make_dispatched_order(client)
+    # A restaurant trying to drag a dispatched order back to PLACED.
+    resp = client.patch(
+        f"/orders/{oid}/status", json={"status": "PLACED"}, headers=rest
+    )
+    assert resp.status_code == 400
+    # And a customer trying to skip their own order straight to DELIVERED.
+    resp = client.patch(
+        f"/orders/{oid}/status",
+        json={"status": "DELIVERED"},
+        headers=_customer_headers(client),
+    )
+    assert resp.status_code in (400, 403)
+
+
+def test_restaurant_cannot_cancel_via_status_endpoint(client):
+    """CANCELLING is only reachable through POST /cancel, which checks the actor.
+
+    Previously `PATCH /status {"status": "CANCELLED"}` fell through to the
+    generic branch, where `is_restaurant_owner` alone was sufficient -- so a
+    restaurant could cancel a customer's order despite the documented
+    customer-or-admin rule on POST /cancel.
+    """
+    order_id, _h = test_create_batch_order(client)
+    oid = order_id[0]
+    rest_headers = {"Authorization": "Bearer " + login(client, "spice@foodai.com")["access_token"]}
+    resp = client.patch(
+        f"/orders/{oid}/status", json={"status": "CANCELLED"}, headers=rest_headers
+    )
+    assert resp.status_code == 400
+    assert "cancel" in resp.json()["detail"].lower()
+    # The order is untouched.
+    resp = client.get(f"/orders/{oid}", headers=rest_headers)
+    assert resp.json()["status"] == "PLACED"
+
+
+def test_restaurant_cannot_mark_delivered(client):
+    """Only the assigned driver or an admin can mark an order DELIVERED.
+
+    COD collection is gated on DELIVERED, so a restaurant able to set it could
+    unblock cash collection on an order its rider never dropped off.
+    """
+    oid, rest, _driver, _customer = _make_dispatched_order(client)
+    resp = client.patch(
+        f"/orders/{oid}/status", json={"status": "DELIVERED"}, headers=rest
+    )
+    assert resp.status_code == 403
+    assert "assigned driver" in resp.json()["detail"]
+
+
+def test_legal_lifecycle_is_still_accepted(client):
+    """The strict happy path must keep working: PLACED->CONFIRMED->PREPARING."""
+    order_id, _h = test_create_batch_order(client)
+    oid = order_id[0]
+    rest_headers = {"Authorization": "Bearer " + login(client, "spice@foodai.com")["access_token"]}
+    for target in ("CONFIRMED", "PREPARING"):
+        resp = client.patch(
+            f"/orders/{oid}/status", json={"status": target}, headers=rest_headers
+        )
+        assert resp.status_code == 200, f"{target}: {resp.text}"
+        assert resp.json()["status"] == target

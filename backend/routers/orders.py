@@ -11,10 +11,10 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 import tracking
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
-from backend import security, simulation
+from backend import idempotency, order_state, security, simulation
 from backend.db import get_db
 from backend.models import (
     Delivery,
@@ -382,12 +382,18 @@ def _create_single_order(
     user: User,
     payload: CreateOrderRequest,
     apply_delivery_fee: bool = True,
+    commit: bool = True,
 ) -> Order:
     """Create one order for a restaurant group (shared by single + batch).
 
     ``apply_delivery_fee`` is False for every group after the first in a
     multi-restaurant cart so the customer is charged exactly the one delivery
     fee the checkout page shows (per-cart, not per-restaurant).
+
+    ``commit`` is False for callers that create several orders and need them
+    all-or-nothing (the batch endpoint, and creation under an idempotency
+    key). Committing per group meant a failure on the third of four
+    restaurant groups left the first two orders live and charged.
     """
     restaurant = db.query(Restaurant).filter(Restaurant.id == payload.restaurant_id).first()
     if restaurant is None:
@@ -474,7 +480,8 @@ def _create_single_order(
         ))
     if promo is not None:
         promo.times_used += 1
-    db.commit()
+    if commit:
+        db.commit()
     db.refresh(order)
     return order
 
@@ -484,8 +491,36 @@ def create_order(
     payload: CreateOrderRequest,
     user: User = Depends(customer_only),
     db: Session = Depends(get_db),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
-    order = _create_single_order(db, user, payload)
+    """Place one order.
+
+    Pass ``Idempotency-Key`` to make a retry safe. See backend/idempotency.py:
+    the key is claimed and the order created in one transaction, so a client
+    that times out and retries gets its original order back instead of a
+    second charge. Without the header this behaves as it always has.
+    """
+    key = idempotency.normalize_key(idempotency_key)
+    if key is not None:
+        replayed, is_replay = idempotency.claim(
+            db, user.id, key, idempotency.ENDPOINT_ORDERS, payload.model_dump()
+        )
+        if is_replay:
+            # Returned from live rows, so a late retry sees the order's
+            # current status rather than a snapshot from first creation.
+            return _order_detail(replayed[0])
+
+    order = _create_single_order(db, user, payload, commit=key is None)
+    if key is not None:
+        idempotency.record_created(
+            db, user.id, key, idempotency.ENDPOINT_ORDERS, [order.id]
+        )
+        # Commit the claim and the order together. This is the atomicity the
+        # whole mechanism rests on: a crash here leaves neither, so the retry
+        # is free to create the order rather than finding a key that promises
+        # an order which does not exist.
+        db.commit()
+        db.refresh(order)
     if order.restaurant is not None and order.restaurant.user_id:
         notify(
             db,
@@ -503,12 +538,47 @@ def create_orders_batch(
     payload: BatchOrderRequest,
     user: User = Depends(customer_only),
     db: Session = Depends(get_db),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
-    """Create one order per restaurant group in a single cart (Swiggy-style)."""
-    orders = [
-        _create_single_order(db, user, req, apply_delivery_fee=(idx == 0))
-        for idx, req in enumerate(payload.orders)
-    ]
+    """Create one order per restaurant group in a single cart (Swiggy-style).
+
+    All groups commit together. Previously each group committed on its own, so
+    a bad menu item in the third group left the first two orders placed and
+    charged with no way for the customer to tell.
+
+    ``Idempotency-Key`` makes a retry of the whole cart safe, same contract as
+    POST /orders.
+    """
+    key = idempotency.normalize_key(idempotency_key)
+    if key is not None:
+        replayed, is_replay = idempotency.claim(
+            db, user.id, key, idempotency.ENDPOINT_ORDERS_BATCH, payload.model_dump()
+        )
+        if is_replay:
+            return BatchOrderResponse(orders=[_order_detail(o) for o in replayed])
+
+    try:
+        orders = [
+            _create_single_order(
+                db, user, req, apply_delivery_fee=(idx == 0), commit=False
+            )
+            for idx, req in enumerate(payload.orders)
+        ]
+        if key is not None:
+            idempotency.record_created(
+                db, user.id, key, idempotency.ENDPOINT_ORDERS_BATCH, [o.id for o in orders]
+            )
+    except Exception:
+        # No group survives a sibling's failure. Note _create_single_order no
+        # longer commits, so this rollback is what makes the batch atomic.
+        db.rollback()
+        raise
+    if key is not None:
+        db.commit()
+        for order in orders:
+            db.refresh(order)
+    else:
+        db.commit()
     for order in orders:
         if order.restaurant is not None and order.restaurant.user_id:
             notify(
@@ -679,13 +749,39 @@ def update_order_status(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Advance an order's status. Restaurant owners (and admins) can confirm/
-    dispatch; the assigned driver can start their trip (OUT_FOR_DELIVERY)."""
+    """Advance an order's status along the legal lifecycle graph.
+
+    Restaurant owners (and admins) confirm/prepare/dispatch; the assigned driver
+    starts the trip (OUT_FOR_DELIVERY) and completes it (DELIVERED).
+
+    Two rules this endpoint deliberately does *not* own, both now enforced here
+    rather than left to a sibling endpoint:
+
+    * CANCELLED is not accepted here. Cancellation is ``POST /orders/{id}/cancel``,
+      which enforces "the customer who owns this order, or an admin". Allowing
+      it through the generic status endpoint let a restaurant owner cancel a
+      customer's order.
+    * Only edges in ``ORDER_TRANSITIONS`` are legal, so a DELIVERED or CANCELLED
+      order can never move again (see ``backend/order_state.py``).
+    """
     if payload.status not in VALID_ORDER_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {payload.status}")
     order = db.query(Order).filter(Order.id == order_id).first()
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found.")
+
+    if payload.status == "CANCELLED":
+        raise HTTPException(
+            status_code=400,
+            detail="Use POST /orders/{id}/cancel to cancel an order.",
+        )
+    if not order_state.can_transition(order.status, payload.status):
+        raise HTTPException(
+            status_code=400,
+            detail=order_state.describe_illegal_transition(
+                order.status, payload.status
+            ),
+        )
 
     is_restaurant_owner = (
         user.role == "restaurant"
@@ -711,13 +807,21 @@ def update_order_status(
         if not (is_restaurant_owner or is_admin):
             raise HTTPException(status_code=403, detail="Only the restaurant can update this order.")
     else:
-        # The assigned driver can complete the trip (money/keys already in
-        # hand); everything else stays restaurant/admin-only.
-        allowed = is_restaurant_owner or is_admin
+        # DELIVERED: the assigned driver completes the trip (money and keys are
+        # already in hand). This is the state the COD-collection gate depends
+        # on, so it is NOT reachable by the restaurant -- a restaurant that
+        # could mark its own order delivered could also unblock cash collection
+        # on an order the rider never actually dropped off.
         if payload.status == "DELIVERED":
-            allowed = allowed or is_assigned_driver
-        if not allowed:
-            raise HTTPException(status_code=403, detail="You cannot update this order.")
+            if not (is_assigned_driver or is_admin):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only the assigned driver or an admin can mark this delivered.",
+                )
+        elif not (is_restaurant_owner or is_admin):
+            raise HTTPException(
+                status_code=403, detail="You cannot update this order."
+            )
 
     order.status = payload.status
     # Starting the trip stamps pickup_time so the simulation engine advances

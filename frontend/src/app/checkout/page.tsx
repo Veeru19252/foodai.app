@@ -1,9 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { addressesApi, ordersApi, paymentsApi } from "@/lib/api";
+import { addressesApi, ordersApi, paymentsApi, newIdempotencyKey } from "@/lib/api";
 import type { SurgeState } from "@/lib/types";
 import { useCart } from "@/lib/cart";
 import type { SavedAddress } from "@/lib/types";
@@ -66,6 +66,11 @@ export default function CheckoutPage() {
   const [saveNote, setSaveNote] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // One key per checkout attempt. Held in a ref (not state) so a rapid
+  // re-submit reuses it instead of minting a new one -- two requests carrying
+  // the same key collapse to one order server-side, whereas two requests with
+  // different keys would both be honoured.
+  const idempotencyKey = useRef<string | null>(null);
   const [surge, setSurge] = useState<SurgeState | null>(null);
   const [scheduleMode, setScheduleMode] = useState<"now" | "later">("now");
   const [scheduledFor, setScheduledFor] = useState("");
@@ -165,6 +170,12 @@ export default function CheckoutPage() {
 
   async function placeOrder(e: FormEvent) {
     e.preventDefault();
+    // Re-entry guard. The submit button is disabled while `busy`, but the form
+    // can also be submitted by pressing Enter in any text input, and a rapid
+    // double-click can land two events before React re-renders the disabled
+    // attribute. Without this, a retry (or a network timeout followed by a
+    // manual retry) creates a second identical order.
+    if (busy) return;
     if (items.length === 0) return;
     if (!locationConfirmed || !otpVerified) {
       setError(
@@ -175,6 +186,10 @@ export default function CheckoutPage() {
     setError("");
     setBusy(true);
     try {
+      // Mint the key on the first attempt and keep it for the rest of this
+      // attempt. A successful order ends the attempt, so a later, genuinely
+      // new order gets a new key (see the reset below).
+      if (!idempotencyKey.current) idempotencyKey.current = newIdempotencyKey();
       const res = await ordersApi.createBatch(
         groups.map((g, idx) => ({
           restaurant_id: g.restaurant_id,
@@ -199,7 +214,8 @@ export default function CheckoutPage() {
           location_confirmed: locationConfirmed,
           location_confirm_lat: gps?.lat ?? point.lat,
           location_confirm_lng: gps?.lng ?? point.lng,
-        }))
+        })),
+        idempotencyKey.current
       );
       const order = res.orders[0];
 
@@ -227,6 +243,7 @@ export default function CheckoutPage() {
       clear();
       // Land on the first order's live tracking page (others stay visible
       // under "My orders").
+      idempotencyKey.current = null;
       router.push(`/tracking/${order.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to place order");
