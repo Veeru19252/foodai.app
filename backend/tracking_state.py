@@ -57,13 +57,24 @@ def order_route(order: Order):
 
 LIVE_POSITION_TTL_SECONDS = 60.0
 
+# How far into the future a fix may be dated and still be trusted. A few
+# seconds of NTP drift is normal; more than this means the reporting device's
+# clock is wrong (or the timestamp was fabricated). The staleness test below is
+# `age > TTL`, and a future timestamp makes `age` negative, so without this
+# lower bound such a fix would be treated as live *forever* -- the customer
+# would watch a marker parked in one spot while the real rider moved on, which
+# looks identical to the rider never arriving.
+MAX_FUTURE_SKEW_SECONDS = 30.0
+
 
 def live_driver_position(order: Order) -> Optional[Tuple[float, float]]:
     """Return the driver's live GPS fix when it is fresh enough to trust.
 
     A fix older than LIVE_POSITION_TTL_SECONDS is treated as stale and the
     simulated rider is used instead, so a driver whose phone loses signal
-    degrades gracefully instead of freezing the marker.
+    degrades gracefully instead of freezing the marker. A fix dated too far in
+    the future is rejected for the same reason, so a wrong device clock cannot
+    freeze the marker indefinitely.
     """
     if (
         order.driver_lat is None
@@ -73,6 +84,8 @@ def live_driver_position(order: Order) -> Optional[Tuple[float, float]]:
         return None
     age = time.time() - _to_epoch_utc(order.driver_updated_at)
     if age > LIVE_POSITION_TTL_SECONDS:
+        return None
+    if age < -MAX_FUTURE_SKEW_SECONDS:
         return None
     return (order.driver_lat, order.driver_lng)
 
