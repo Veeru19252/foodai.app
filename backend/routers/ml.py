@@ -107,9 +107,24 @@ def get_eta(
         customer_home=home,
     )
     predicted = eta_service.predict_eta(features)
-    if predicted is None:
-        raise HTTPException(status_code=503, detail="ETA model unavailable.")
-    return {"eta_min": round(predicted, 1), "features": features, "fallback": False}
+    # Degrade gracefully instead of 503, and never present a model that is
+    # worse than the distance/speed formula as "ML". ``source`` tells the
+    # caller which path produced the number.
+    if predicted is None or not eta_service.model_beats_baseline():
+        return {
+            "eta_min": round(eta_service.formula_eta(distance_km, prep_time_min), 1),
+            "features": features,
+            "fallback": True,
+            "source": "formula",
+            "model_metrics": eta_service.model_metrics(),
+        }
+    return {
+        "eta_min": round(predicted, 1),
+        "features": features,
+        "fallback": False,
+        "source": "ml",
+        "model_metrics": eta_service.model_metrics(),
+    }
 
 
 @router.post("/eta/explain")
@@ -128,9 +143,9 @@ def explain_eta(
         customer_home=home,
     )
     explanation = explain_service.explain_eta(features)
-    if explanation is None:
-        raise HTTPException(status_code=503, detail="SHAP explainer unavailable.")
-    return {"explanation": explanation, "fallback": False}
+    # Same graceful-degradation contract as /ml/eta: a missing explainer is a
+    # null explanation, not a 503.
+    return {"explanation": explanation, "fallback": explanation is None}
 
 
 @router.get("/forecast")

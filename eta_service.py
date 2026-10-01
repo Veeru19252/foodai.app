@@ -29,6 +29,7 @@ Design constraints
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -47,6 +48,9 @@ if TYPE_CHECKING:
 __all__ = [
     "load_model",
     "predict_eta",
+    "model_metrics",
+    "model_beats_baseline",
+    "formula_eta",
     "ZONE_ANCHORS",
     "nearest_zone",
     "features_for_order",
@@ -60,6 +64,10 @@ __all__ = [
 
 ROOT = Path(__file__).resolve().parent
 MODEL_PATH = ROOT / "models" / "eta_model.joblib"
+# Recorded MAE/RMSE per model from scripts/train_eta.py. Used to decide whether
+# the shipped model is actually better than the trivial baseline before we
+# present its output as "ML".
+METRICS_PATH = ROOT / "outputs" / "metrics_eta.json"
 
 # --- Feature schema (mirrors scripts/train_eta.py) -------------------------
 
@@ -106,6 +114,45 @@ def load_model() -> Optional[XGBRegressor]:
         )
         return None
     return joblib.load(MODEL_PATH)
+
+
+@lru_cache(maxsize=1)
+def model_metrics() -> Optional[dict]:
+    """Load the recorded model-comparison metrics, or None if unavailable."""
+    if not METRICS_PATH.exists():
+        return None
+    try:
+        return json.loads(METRICS_PATH.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def model_beats_baseline() -> bool:
+    """True when the shipped model's MAE beats the simulator baseline.
+
+    Guards against presenting a model that is worse than the trivial formula
+    as "ML": if the recorded metrics are missing, or the model does not beat
+    the baseline, callers should fall back to ``formula_eta``.
+    """
+    metrics = model_metrics()
+    if not metrics:
+        return False
+    model_mae = (metrics.get("xgboost") or {}).get("mae")
+    baseline_mae = (metrics.get("baseline") or {}).get("mae")
+    if model_mae is None or baseline_mae is None:
+        return False
+    return model_mae < baseline_mae
+
+
+def formula_eta(distance_km: float, prep_time_min: float) -> float:
+    """Distance/speed fallback ETA in minutes (no model required).
+
+    Mirrors ``tracking.compute_distance_eta``: road distance (straight-line x
+    ROAD_FACTOR) at AVG_SPEED_KMH plus the kitchen prep time.
+    """
+    road_km = distance_km * tracking.ROAD_FACTOR
+    travel_min = road_km / tracking.AVG_SPEED_KMH * 60.0
+    return prep_time_min + travel_min
 
 
 # --- Pure helpers ----------------------------------------------------------
