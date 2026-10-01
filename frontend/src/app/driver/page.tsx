@@ -221,7 +221,7 @@ export default function DriverPage() {
 
               {(d.order_status === "PREPARING" ||
                 d.order_status === "CONFIRMED") && (
-                <button
+                <button type="button"
                   onClick={() => startDelivery(d.order_id)}
                   disabled={busyId === d.order_id}
                   className="mt-3 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
@@ -239,7 +239,7 @@ export default function DriverPage() {
                     Navigate
                   </Link>
                   <ShareLocationButton orderId={d.order_id} />
-                  <button
+                  <button type="button"
                     onClick={() => completeDelivery(d.order_id)}
                     disabled={busyId === d.order_id}
                     className="inline-block rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-card disabled:opacity-60"
@@ -252,7 +252,7 @@ export default function DriverPage() {
               {d.order_status === "DELIVERED" &&
                 d.payment_method === "COD" &&
                 d.payment_status === "PENDING" && (
-                  <button
+                  <button type="button"
                     onClick={() => collectCash(d.order_id)}
                     disabled={busyId === d.order_id}
                     className="mt-3 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
@@ -340,7 +340,7 @@ function ShareLocationButton({ orderId }: { orderId: number }) {
             <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
             Sharing location{lastSent ? ` · ${lastSent}` : "…"}
           </span>
-          <button
+          <button type="button"
             onClick={stop}
             className="rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-secondary hover:bg-surface"
           >
@@ -348,7 +348,7 @@ function ShareLocationButton({ orderId }: { orderId: number }) {
           </button>
         </>
       ) : (
-        <button
+        <button type="button"
           onClick={start}
           className="inline-block rounded-lg border border-brand-500/40 bg-card px-3 py-1.5 text-sm font-semibold text-brand-300 hover:bg-brand-500/10"
         >

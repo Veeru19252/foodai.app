@@ -109,7 +109,9 @@ jobs:
       - name: Run e2e tests
         env:
           CI: "true"
-        run: npx playwright test
+        # screenshots.spec.ts regenerates the committed docs/screenshots/*.png
+        # and needs a seeded local DB, so it is a local-only tool.
+        run: npx playwright test --grep-invert "@screenshots"
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4

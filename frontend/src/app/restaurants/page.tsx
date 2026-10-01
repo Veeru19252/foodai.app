@@ -63,7 +63,7 @@ export default function RestaurantsPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button
+          <button type="button"
             onClick={() => setCuisine("All")}
             className={`rounded-full px-3 py-1.5 text-sm font-medium ${
               cuisine === "All"
@@ -74,7 +74,7 @@ export default function RestaurantsPage() {
             All
           </button>
           {cuisines.map((c) => (
-            <button
+            <button type="button"
               key={c}
               onClick={() => setCuisine(c)}
               className={`rounded-full px-3 py-1.5 text-sm font-medium ${
@@ -112,7 +112,7 @@ export default function RestaurantsPage() {
               {location.areaLabel}, {location.city}
             </span>
           </p>
-          <button
+          <button type="button"
             onClick={() => setLocationOpen(true)}
             className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-medium text-brand-300 transition hover:bg-elevated"
           >
@@ -128,7 +128,7 @@ export default function RestaurantsPage() {
             Tell us where to deliver so we can show restaurants and delivery
             times near you.
           </p>
-          <button
+          <button type="button"
             onClick={() => setLocationOpen(true)}
             className="rounded-xl bg-brand-600 px-5 py-2.5 font-semibold text-white transition hover:bg-brand-700"
           >
@@ -156,7 +156,7 @@ export default function RestaurantsPage() {
               </p>
               <div className="stagger grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {cityRecommendations.map((rec) => (
-                  <button
+                  <button type="button"
                     key={rec.restaurant_id}
                     onClick={() =>
                       setSelected({
@@ -191,7 +191,7 @@ export default function RestaurantsPage() {
 
           <div className="stagger grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {restaurants.map((r) => (
-              <button
+              <button type="button"
                 key={r.id}
                 onClick={() => setSelected(r)}
                 className="press card-premium group p-5 text-left"

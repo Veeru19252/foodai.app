@@ -108,7 +108,7 @@ export default function LocationPickerModal({
               Pick a city, select a preset, or tap the map to drop a pin.
             </p>
           </div>
-          <button
+          <button type="button"
             onClick={onClose}
             className="grid h-8 w-8 place-items-center rounded-full bg-surface hover:bg-elevated"
             aria-label="Close"
@@ -130,13 +130,13 @@ export default function LocationPickerModal({
         </div>
 
         <div className="flex gap-2 border-t border-line bg-card px-5 py-4">
-          <button
+          <button type="button"
             onClick={onClose}
             className="flex-1 rounded-lg border border-line px-3 py-2 font-medium text-secondary hover:bg-surface"
           >
             Cancel
           </button>
-          <button
+          <button type="button"
             onClick={handleConfirm}
             disabled={!point}
             className="flex-1 rounded-lg bg-brand-600 px-3 py-2 font-semibold text-white hover:bg-brand-700 disabled:opacity-60"

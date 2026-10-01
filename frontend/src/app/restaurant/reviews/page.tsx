@@ -100,7 +100,7 @@ export default function RestaurantReviewsPage() {
                   placeholder="Thank the customer…"
                   className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-foreground placeholder:text-faint focus:border-brand-500 focus:outline-none"
                 />
-                <button
+                <button type="button"
                   onClick={() => reply(r.id)}
                   disabled={busyId === r.id || !(replyText[r.id] ?? "").trim()}
                   className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"

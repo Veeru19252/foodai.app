@@ -128,7 +128,7 @@ export default function OnboardingGate() {
               onCityChange={setCity}
               cityCenters={CITY_CENTERS}
             />
-            <button
+            <button type="button"
               onClick={handleConfirmLocation}
               className="mt-4 w-full rounded-xl bg-brand-400 px-4 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-brand-300"
             >

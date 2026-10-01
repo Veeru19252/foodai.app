@@ -102,7 +102,7 @@ export default function NotificationBell() {
 
   return (
     <div className="relative">
-      <button
+      <button type="button"
         onClick={toggle}
         aria-label="Notifications"
         className={`relative grid h-9 w-9 place-items-center rounded-full transition ${
@@ -121,7 +121,7 @@ export default function NotificationBell() {
         <div className="absolute right-0 top-11 z-50 w-80 rounded-2xl border border-line bg-card shadow-2xl">
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <p className="font-semibold">Notifications</p>
-            <button
+            <button type="button"
               onClick={() => {
                 setNotifications([]);
                 setUnread(0);

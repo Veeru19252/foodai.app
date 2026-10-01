@@ -132,7 +132,7 @@ export default function PhoneOtpVerify({
               className="min-w-0 flex-1 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-brand-400/60"
             />
           </div>
-          <button
+          <button type="button"
             onClick={sendOtp}
             disabled={!canSend}
             className="rounded-xl bg-brand-400 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-brand-300 disabled:cursor-not-allowed disabled:opacity-40"
@@ -147,7 +147,7 @@ export default function PhoneOtpVerify({
               Code sent to{" "}
               <span className="font-medium text-zinc-100">+91 {sentTo}</span>
             </span>
-            <button
+            <button type="button"
               onClick={editPhone}
               className="text-xs font-medium text-brand-300 hover:text-brand-200"
             >
@@ -162,14 +162,14 @@ export default function PhoneOtpVerify({
             onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
             className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-center text-lg tracking-[0.5em] text-zinc-100 outline-none placeholder:text-base placeholder:tracking-normal placeholder:text-zinc-600 focus:border-brand-400/60"
           />
-          <button
+          <button type="button"
             onClick={verifyCode}
             disabled={!canVerify}
             className="rounded-xl bg-brand-400 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-brand-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {loading ? "Verifying…" : "Verify & continue"}
           </button>
-          <button
+          <button type="button"
             onClick={sendOtp}
             disabled={cooldown > 0 || loading}
             className="text-xs font-medium text-zinc-400 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"

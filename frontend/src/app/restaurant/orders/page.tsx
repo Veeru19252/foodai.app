@@ -181,21 +181,21 @@ export default function RestaurantOrdersPage() {
                       </option>
                     ))}
                   </select>
-                  <button
+                  <button type="button"
                     onClick={() => assignDriver(o.id)}
                     disabled={busyId === o.id || !assigned || !!o.assigned_driver_id}
                     className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-surface disabled:opacity-50"
                   >
                     {busyId === o.id ? "Assigning…" : "Assign driver"}
                   </button>
-                  <button
+                  <button type="button"
                     onClick={() => autoAssign(o.id)}
                     disabled={busyId === o.id || !!o.assigned_driver_id}
                     className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
                   >
                     {busyId === o.id ? "Matching…" : "⚡ Auto-assign"}
                   </button>
-                  <button
+                  <button type="button"
                     onClick={() => advance(o.id, "OUT_FOR_DELIVERY")}
                     disabled={busyId === o.id || !o.assigned_driver_id}
                     className="rounded-lg bg-foreground px-3 py-1.5 text-sm font-semibold text-background hover:bg-secondary disabled:opacity-50"
@@ -207,7 +207,7 @@ export default function RestaurantOrdersPage() {
 
               {next && !needsDriver && (
                 <div className="mt-3 border-t border-line pt-3">
-                  <button
+                  <button type="button"
                     onClick={() => advance(o.id, next)}
                     disabled={busyId === o.id}
                     className="rounded-lg bg-foreground px-3 py-1.5 text-sm font-semibold text-background hover:bg-secondary disabled:opacity-60"

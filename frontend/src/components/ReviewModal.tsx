@@ -87,13 +87,13 @@ export default function ReviewModal({
         )}
 
         <div className="flex gap-2">
-          <button
+          <button type="button"
             onClick={onClose}
             className="flex-1 rounded-lg border border-line px-3 py-2 font-medium text-secondary hover:bg-surface"
           >
             Cancel
           </button>
-          <button
+          <button type="button"
             onClick={submit}
             disabled={busy}
             className="flex-1 rounded-lg bg-brand-600 px-3 py-2 font-semibold text-white hover:bg-brand-700 disabled:opacity-60"

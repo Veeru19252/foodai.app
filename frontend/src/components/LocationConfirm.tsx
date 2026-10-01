@@ -108,7 +108,7 @@ export default function LocationConfirm({
         )}
       </div>
 
-      <button
+      <button type="button"
         onClick={useCurrentLocation}
         disabled={locating}
         className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm font-medium text-zinc-200 transition hover:border-zinc-600 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"

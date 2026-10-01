@@ -53,7 +53,7 @@ export default function Navbar() {
         <nav className="flex items-center gap-4 text-sm">
           {user?.role === "customer" && (
             <>
-              <button
+              <button type="button"
                 onClick={() => setLocationOpen(true)}
                 className="flex items-center gap-1.5 rounded-full border border-line bg-card/60 px-3 py-1.5 font-medium text-secondary transition-colors duration-150 hover:bg-surface hover:text-brand-300"
                 title="Change delivery location"
@@ -78,7 +78,7 @@ export default function Navbar() {
                   : "Set location"}
               </button>
               {!user.phone_verified_at && (
-                <button
+                <button type="button"
                   onClick={() => setPhoneOpen(true)}
                   className="rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1.5 font-medium text-brand-300 transition-colors duration-150 hover:bg-brand-500/20"
                   title="Verify your phone number"
@@ -144,7 +144,7 @@ export default function Navbar() {
               <span className="hidden text-muted sm:inline">
                 {user.name} ({user.role})
               </span>
-              <button
+              <button type="button"
                 onClick={handleLogout}
                 className="press rounded-lg border border-line bg-card/60 px-3 py-1.5 font-medium text-secondary transition-colors duration-150 hover:bg-surface"
               >
@@ -190,7 +190,7 @@ export default function Navbar() {
         >
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-lg font-bold text-zinc-100">Verify your phone</h2>
-            <button
+            <button type="button"
               onClick={() => setPhoneOpen(false)}
               className="grid h-8 w-8 place-items-center rounded-full bg-surface hover:bg-elevated"
               aria-label="Close"

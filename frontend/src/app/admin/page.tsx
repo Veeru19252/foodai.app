@@ -223,7 +223,7 @@ export default function AdminPage() {
                   every live order, then swaps the model the forecast reads.
                 </p>
               </div>
-              <button
+              <button type="button"
                 onClick={runRetrain}
                 disabled={retrainBusy}
                 className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"

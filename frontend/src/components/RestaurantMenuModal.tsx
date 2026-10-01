@@ -60,7 +60,7 @@ export default function RestaurantMenuModal({
               {restaurant.cuisine} · ★ {restaurant.rating.toFixed(1)}
             </p>
           </div>
-          <button
+          <button type="button"
             onClick={onClose}
             className="grid h-8 w-8 place-items-center rounded-full bg-surface hover:bg-elevated"
             aria-label="Close"
@@ -86,7 +86,7 @@ export default function RestaurantMenuModal({
                   </p>
                 </div>
                 {qty === 0 ? (
-                  <button
+                  <button type="button"
                     onClick={() =>
                       addItem(restaurant.id, restaurant.name, {
                         menu_item_id: item.id,
@@ -103,14 +103,14 @@ export default function RestaurantMenuModal({
                   </button>
                 ) : (
                   <div className="flex items-center gap-3 rounded-full border-2 border-brand-500 px-2 py-1">
-                    <button
+                    <button type="button"
                       onClick={() => setQuantity(item.id, qty - 1)}
                       className="h-6 w-6 text-brand-400"
                     >
                       −
                     </button>
                     <span className="w-4 text-center font-semibold">{qty}</span>
-                    <button
+                    <button type="button"
                       onClick={() =>
                         addItem(restaurant.id, restaurant.name, {
                           menu_item_id: item.id,
@@ -150,7 +150,7 @@ export default function RestaurantMenuModal({
                     <p className="text-sm font-medium">{r.name}</p>
                     <p className="text-xs text-faint">{r.reason}</p>
                   </div>
-                  <button
+                  <button type="button"
                     onClick={() =>
                       addItem(restaurant.id, restaurant.name, {
                         menu_item_id: r.menu_item_id,

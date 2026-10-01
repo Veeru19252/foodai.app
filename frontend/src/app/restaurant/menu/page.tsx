@@ -175,7 +175,7 @@ export default function RestaurantMenuPage() {
                         className="w-20 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-foreground focus:border-brand-500 focus:outline-none"
                         aria-label={`Price for ${item.name}`}
                       />
-                      <button
+                      <button type="button"
                         onClick={() => savePrice(item.id)}
                         disabled={busy}
                         className="rounded-lg bg-brand-600 px-2 py-1 text-xs font-semibold text-white hover:bg-brand-700"
@@ -186,7 +186,7 @@ export default function RestaurantMenuPage() {
                   ) : (
                     <>
                       <span className="font-semibold">₹{item.price.toFixed(0)}</span>
-                      <button
+                      <button type="button"
                         onClick={() => {
                           setEditingId(item.id);
                           setEditPrice(String(item.price));
@@ -195,7 +195,7 @@ export default function RestaurantMenuPage() {
                       >
                         Edit
                       </button>
-                      <button
+                      <button type="button"
                         onClick={() => removeItem(item.id)}
                         disabled={busy}
                         className="text-xs font-medium text-red-400 hover:underline"

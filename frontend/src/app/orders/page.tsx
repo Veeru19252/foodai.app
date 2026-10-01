@@ -218,7 +218,7 @@ export default function OrdersPage() {
                     </Link>
                   )}
                   {o.status !== "CANCELLED" && (
-                    <button
+                    <button type="button"
                       onClick={() => reorder(o.id)}
                       disabled={busyId === o.id}
                       className="text-sm font-semibold text-brand-600 hover:underline disabled:opacity-60"
@@ -226,14 +226,14 @@ export default function OrdersPage() {
                       {busyId === o.id ? "Reordering…" : "Order again"}
                     </button>
                   )}
-                  <button
+                  <button type="button"
                     onClick={() => openReceipt(o)}
                     className="text-sm font-semibold text-secondary hover:underline"
                   >
                     Receipt
                   </button>
                   {cancellable(o) && (
-                    <button
+                    <button type="button"
                       onClick={() => cancelOrder(o.id)}
                       disabled={busyId === o.id}
                       className="text-sm font-medium text-red-400 hover:underline disabled:opacity-60"
@@ -245,7 +245,7 @@ export default function OrdersPage() {
                     (reviewed ? (
                       <span className="text-sm text-faint">✓ Reviewed</span>
                     ) : (
-                      <button
+                      <button type="button"
                         onClick={() => setReviewTarget(o)}
                         className="text-sm font-semibold text-amber-400 hover:underline"
                       >
@@ -340,13 +340,13 @@ export default function OrdersPage() {
                   {receipt.billed_to ? ` · ${receipt.billed_to}` : ""}
                 </p>
                 <div className="mt-4 flex gap-2">
-                  <button
+                  <button type="button"
                     onClick={emailReceipt}
                     className="flex-1 rounded-lg bg-brand-600 px-3 py-2 font-semibold text-white hover:bg-brand-700"
                   >
                     Email receipt
                   </button>
-                  <button
+                  <button type="button"
                     onClick={() => setReceiptTarget(null)}
                     className="flex-1 rounded-lg border border-line px-3 py-2 font-medium text-secondary hover:bg-surface"
                   >

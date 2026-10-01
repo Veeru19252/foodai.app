@@ -205,7 +205,7 @@ export default function RestaurantOffersPage() {
                     {offer.active ? "ACTIVE" : "PAUSED"}
                   </span>
                   {offer.scope === "restaurant" && (
-                    <button
+                    <button type="button"
                       onClick={() => toggle(offer)}
                       disabled={busy}
                       className="text-xs font-medium text-brand-400 hover:underline"
