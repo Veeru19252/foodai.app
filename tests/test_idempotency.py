@@ -194,6 +194,85 @@ def test_batch_retry_returns_same_orders(client):
     assert second.status_code == 201, second.text
     assert [o["id"] for o in second.json()["orders"]] == first_ids
 
+    # The replay is rebuilt from stored orders through _order_detail, which
+    # reads the customer, the restaurant and every line item. The response
+    # must match the original in full, not just in ids: eager-loading those in
+    # _load_orders is what keeps the replay to a fixed query count, and a
+    # missing item name or customer name would mean the loader options were
+    # wrong rather than merely absent.
+    replayed = second.json()["orders"]
+    assert replayed == first.json()["orders"]
+    for order in replayed:
+        assert order["restaurant_name"]
+        assert order["customer_name"]
+        assert order["items"], order
+        for line in order["items"]:
+            assert line["name"], line
+
+
+def test_batch_reload_does_not_query_per_order():
+    """Loading a replayed batch must not scale its query count with the batch."""
+    from sqlalchemy import event
+
+    from backend.db import SessionLocal
+    from backend.models import Restaurant, User
+
+    db = SessionLocal()
+    try:
+        owner = db.query(User).filter(User.email == "customer@foodai.com").first()
+        restaurant = (
+            db.query(Restaurant).filter(Restaurant.name == "Spice Garden").first()
+        )
+        order_ids = [
+            o.id
+            for o in db.query(Order)
+            .filter(Order.restaurant_id == restaurant.id)
+            .order_by(Order.id)
+            .limit(5)
+            .all()
+        ]
+        assert order_ids, "expected some seeded orders for this restaurant"
+
+        counter = {"n": 0}
+
+        def _on_execute(*_args, **_kwargs):
+            counter["n"] += 1
+
+        # Listen on the session's own Connection: the background simulation
+        # task shares the engine, and counting at engine level would attribute
+        # its statements to this loader and make the count flaky.
+        db.expunge_all()  # clear the identity map, so lazy loads really query
+        connection = db.connection()
+        event.listen(connection, "before_cursor_execute", _on_execute)
+        try:
+            orders = idempotency._load_orders(db, order_ids)
+            assert [o.id for o in orders] == order_ids
+
+            # Serialize inside the counted window. Counting only the load would
+            # pass against the unfixed code, because a lazy load defers the
+            # cost to first access rather than avoiding it: the load itself is
+            # one query, and the queries come later.
+            from backend.routers.orders import _order_detail
+
+            details = [_order_detail(o) for o in orders]
+        finally:
+            event.remove(connection, "before_cursor_execute", _on_execute)
+
+        assert counter["n"] <= 5, (
+            f"loading and serializing {len(order_ids)} orders issued "
+            f"{counter['n']} queries; items, restaurant and customer should "
+            "be eager-loaded"
+        )
+        for detail in details:
+            assert detail["restaurant_name"]
+            assert detail["customer_name"]
+            assert detail["items"], detail
+            for line in detail["items"]:
+                assert line["name"], line
+        assert owner is not None
+    finally:
+        db.close()
+
 
 def test_batch_is_atomic_on_failure(client):
     """A bad group must not leave its healthy siblings placed.
