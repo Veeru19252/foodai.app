@@ -7,7 +7,7 @@ Customers rate a restaurant after a DELIVERED order. One review per order.
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from backend import security
 from backend.db import get_db
@@ -73,8 +73,12 @@ def reply_to_review(
 
 @router.get("/restaurant/{restaurant_id}", response_model=list)
 def list_reviews(restaurant_id: int, db: Session = Depends(get_db)):
+    # _review_out reads review.user.name, which is lazy: one SELECT per review
+    # (measured 101 queries for 100 reviews). Reviews are unbounded and public,
+    # so the busiest restaurant is the worst case.
     reviews = (
         db.query(Review)
+        .options(joinedload(Review.user))
         .filter(Review.restaurant_id == restaurant_id)
         .order_by(Review.id.desc())
         .all()
@@ -93,6 +97,7 @@ def my_restaurant_reviews(
         return []
     reviews = (
         db.query(Review)
+        .options(joinedload(Review.user))
         .filter(Review.restaurant_id.in_(restaurant_ids))
         .order_by(Review.id.desc())
         .all()
