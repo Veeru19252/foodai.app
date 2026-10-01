@@ -100,12 +100,15 @@ def test_cod_confirm_and_cancel_flow(client):
         headers=rest_headers,
     )
     assert resp.status_code == 200, resp.text
-    resp = client.patch(
-        f"/orders/{order2['id']}/status",
-        json={"status": "OUT_FOR_DELIVERY"},
-        headers=rest_headers,
-    )
-    assert resp.status_code == 200, resp.text
+    # Strict lifecycle: confirm, then prepare, then dispatch. The rider only
+    # gets a say at DELIVERED, which is what gates COD collection.
+    for status in ("CONFIRMED", "PREPARING", "OUT_FOR_DELIVERY"):
+        resp = client.patch(
+            f"/orders/{order2['id']}/status",
+            json={"status": status},
+            headers=rest_headers,
+        )
+        assert resp.status_code == 200, f"{status}: {resp.text}"
     resp = client.patch(
         f"/orders/{order2['id']}/status",
         json={"status": "DELIVERED"},

@@ -20,16 +20,14 @@ graph below. Terminal states have no outgoing edges, so they cannot be left.
 
 Two deliberate design choices:
 
-* ``PLACED -> OUT_FOR_DELIVERY`` and ``CONFIRMED -> OUT_FOR_DELIVERY`` are
-  allowed so a kitchen that is ahead of schedule can dispatch without first
-  pressing "confirm" and "preparing". The restaurant UI's ``NEXT_STATUS`` map
-  walks the strict path; these edges mean the strict path is not the only legal
-  one. This preserves the app's existing dispatch behaviour (pre-packed items,
-  and the flow the tests and the seeded demo rely on) while still refusing
-  every transition that would actually be wrong. Note this is a *laxness in the
-  business flow*, not an authorization hole: dispatching still requires the
-  restaurant to own the order and a driver to be assigned, and only the assigned
-  driver or an admin can mark it DELIVERED.
+* The happy path is strict: ``PLACED -> CONFIRMED -> PREPARING ->
+  OUT_FOR_DELIVERY``. Earlier drafts also allowed ``PLACED -> OUT_FOR_DELIVERY``
+  and ``CONFIRMED -> OUT_FOR_DELIVERY`` so a kitchen ahead of schedule could
+  dispatch in one press, but that made ``CONFIRMED`` and ``PREPARING``
+  unenforced -- the graph documented a lifecycle the API did not actually
+  require. The restaurant UI's ``NEXT_STATUS`` map already walked the strict
+  path, so nothing in the product needed the shortcut. A kitchen that really
+  does dispatch early can be modelled by dispatching a PREPARING order.
 * ``CANCELLED`` is reachable from any pre-delivery state, but *only* through
   ``POST /orders/{id}/cancel``, which enforces its own actor check (the
   customer who owns the order, or an admin). It is deliberately not reachable
@@ -41,8 +39,8 @@ from __future__ import annotations
 
 #: Legal transitions. A status not present as a key is terminal.
 ORDER_TRANSITIONS: dict[str, frozenset[str]] = {
-    "PLACED": frozenset({"CONFIRMED", "OUT_FOR_DELIVERY", "CANCELLED"}),
-    "CONFIRMED": frozenset({"PREPARING", "OUT_FOR_DELIVERY", "CANCELLED"}),
+    "PLACED": frozenset({"CONFIRMED", "CANCELLED"}),
+    "CONFIRMED": frozenset({"PREPARING", "CANCELLED"}),
     "PREPARING": frozenset({"OUT_FOR_DELIVERY", "CANCELLED"}),
     "OUT_FOR_DELIVERY": frozenset({"DELIVERED"}),
     "DELIVERED": frozenset(),

@@ -45,10 +45,17 @@ def test_strict_happy_path_is_legal():
         assert can_transition(current, target), f"{current} -> {target} should be legal"
 
 
-def test_dispatch_can_skip_ahead():
-    """Pre-packed items dispatch without a confirm/prepare press."""
-    assert can_transition("PLACED", "OUT_FOR_DELIVERY")
-    assert can_transition("CONFIRMED", "OUT_FOR_DELIVERY")
+def test_dispatch_cannot_skip_ahead():
+    """Every status must be entered through the one before it.
+
+    Allowing PLACED -> OUT_FOR_DELIVERY made CONFIRMED and PREPARING
+    decorative: the graph would document a lifecycle the API never required.
+    """
+    assert not can_transition("PLACED", "OUT_FOR_DELIVERY")
+    assert not can_transition("PLACED", "PREPARING")
+    assert not can_transition("PLACED", "DELIVERED")
+    assert not can_transition("CONFIRMED", "OUT_FOR_DELIVERY")
+    assert not can_transition("CONFIRMED", "DELIVERED")
 
 
 def test_cancellable_until_dispatch():
@@ -78,7 +85,11 @@ def test_error_message_explains_why():
     # Non-terminal current state: list what *is* reachable.
     msg = describe_illegal_transition("PLACED", "DELIVERED")
     assert "DELIVERED" in msg
-    assert "Allowed next: CANCELLED, CONFIRMED, OUT_FOR_DELIVERY." in msg
+    assert "Allowed next: CANCELLED, CONFIRMED." in msg
+
+    # Skipping ahead is explained with the state actually required.
+    msg = describe_illegal_transition("PLACED", "OUT_FOR_DELIVERY")
+    assert "Allowed next: CANCELLED, CONFIRMED." in msg
 
     # A terminal *target* is explained as a routing problem, not a "final state"
     # claim about the current status (PLACED is not final).

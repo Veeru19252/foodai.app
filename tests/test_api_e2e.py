@@ -262,12 +262,7 @@ def test_restaurant_full_lifecycle(client):
     assert resp.status_code == 200
 
     # Start delivery stamps pickup_time
-    resp = client.patch(
-        f"/orders/{order_id}/status",
-        json={"status": "OUT_FOR_DELIVERY"},
-        headers={"Authorization": f"Bearer {rest_token}"},
-    )
-    assert resp.status_code == 200
+    _dispatch(client, order_id, rest_token)
     return order_id, driver, customer_token, rest_token
 
 
@@ -795,6 +790,36 @@ def _line(menu_item_id, quantity):
     return {"menu_item_id": menu_item_id, "quantity": quantity}
 
 
+def _advance(client, order_id, rest_token, statuses):
+    """Patch an order through `statuses`, asserting each one succeeds."""
+    headers = {"Authorization": f"Bearer {rest_token}"}
+    body = None
+    for status in statuses:
+        resp = client.patch(
+            f"/orders/{order_id}/status", json={"status": status}, headers=headers
+        )
+        assert resp.status_code == 200, f"{status}: {resp.text}"
+        body = resp.json()
+    return body
+
+
+def _prepare(client, order_id, rest_token):
+    """Walk an order to PREPARING, leaving dispatch as the only step left."""
+    return _advance(client, order_id, rest_token, ("CONFIRMED", "PREPARING"))
+
+
+def _dispatch(client, order_id, rest_token):
+    """Walk an order along the strict lifecycle to OUT_FOR_DELIVERY.
+
+    The graph has no skip-ahead edges, so a test that wants an order in
+    transit has to confirm and prepare it first, exactly as the restaurant
+    UI does. Returns the final status response body.
+    """
+    return _advance(
+        client, order_id, rest_token, ("CONFIRMED", "PREPARING", "OUT_FOR_DELIVERY")
+    )
+
+
 def _gate(client, **overrides):
     """Order payload with the pre-order verification gate satisfied.
 
@@ -1001,6 +1026,44 @@ def test_cannot_cancel_other_users_order(client):
     assert resp.status_code == 403
 
 
+def test_status_endpoint_refuses_skipped_dispatch(client):
+    """A PLACED order cannot jump to OUT_FOR_DELIVERY or DELIVERED.
+
+    The unit tests in test_order_state.py pin the graph; this pins the route,
+    so a future handler that assigns `order.status = ...` directly instead of
+    routing through `order_state.can_transition` fails here rather than in
+    production. The error names the state actually required so the restaurant
+    UI can tell the user what to press.
+    """
+    order_id, _headers = test_create_batch_order(client)
+    oid = order_id[0]
+    rest_token = login(client, "spice@foodai.com")["access_token"]
+    rest_headers = {"Authorization": f"Bearer {rest_token}"}
+    driver = client.get("/orders/drivers", headers=rest_headers).json()[0]
+    resp = client.post(
+        f"/orders/{oid}/assign", json={"driver_id": driver["id"]}, headers=rest_headers
+    )
+    assert resp.status_code == 200
+
+    for target in ("OUT_FOR_DELIVERY", "DELIVERED"):
+        resp = client.patch(
+            f"/orders/{oid}/status", json={"status": target}, headers=rest_headers
+        )
+        assert resp.status_code == 400, f"PLACED -> {target} must be refused: {resp.text}"
+        assert "CONFIRMED" in resp.json()["detail"]
+
+    # Confirming is allowed, and the order is still not yet in transit.
+    resp = client.patch(
+        f"/orders/{oid}/status", json={"status": "CONFIRMED"}, headers=rest_headers
+    )
+    assert resp.status_code == 200
+    resp = client.patch(
+        f"/orders/{oid}/status", json={"status": "OUT_FOR_DELIVERY"}, headers=rest_headers
+    )
+    assert resp.status_code == 400
+    assert "PREPARING" in resp.json()["detail"]
+
+
 # ---- Phase 3: driver starts delivery ----
 
 def test_assigned_driver_can_dispatch(client):
@@ -1008,6 +1071,9 @@ def test_assigned_driver_can_dispatch(client):
     # Pick a fresh order and let the assigned driver dispatch it.
     order_id, _h = test_create_batch_order(client)
     order_id = order_id[0]
+    rest_token = login(client, "spice@foodai.com")["access_token"]
+    _prepare(client, order_id, rest_token)
+
     driver_token = login(client, driver["email"])["access_token"]
     resp = client.patch(
         f"/orders/{order_id}/status",
@@ -1017,7 +1083,6 @@ def test_assigned_driver_can_dispatch(client):
     # The driver isn't assigned to this new order yet.
     assert resp.status_code == 403
 
-    rest_token = login(client, "spice@foodai.com")["access_token"]
     client.post(
         f"/orders/{order_id}/assign",
         json={"driver_id": driver["id"]},
@@ -1034,9 +1099,14 @@ def test_assigned_driver_can_dispatch(client):
 
 def test_unassigned_driver_cannot_dispatch(client):
     order_id, headers = test_create_batch_order(client)
+    order_id = order_id[0]
+    rest_token = login(client, "spice@foodai.com")["access_token"]
+    # Prepare it so dispatch is the only remaining step, isolating the
+    # authorization check from the transition graph.
+    _prepare(client, order_id, rest_token)
     other_token = login(client, "rider@foodai.com")["access_token"]
     resp = client.patch(
-        f"/orders/{order_id[0]}/status",
+        f"/orders/{order_id}/status",
         json={"status": "OUT_FOR_DELIVERY"},
         headers={"Authorization": f"Bearer {other_token}"},
     )
@@ -1052,7 +1122,7 @@ def _delivered_order_id(client):
     rest_token = login(client, "spice@foodai.com")["access_token"]
     driver = client.get("/orders/drivers", headers={"Authorization": f"Bearer {rest_token}"}).json()[0]
     client.post(f"/orders/{order_id}/assign", json={"driver_id": driver["id"]}, headers={"Authorization": f"Bearer {rest_token}"})
-    client.patch(f"/orders/{order_id}/status", json={"status": "OUT_FOR_DELIVERY"}, headers={"Authorization": f"Bearer {rest_token}"})
+    _dispatch(client, order_id, rest_token)
     # Mark delivered directly so the review gate is reachable without waiting.
     from backend.models import Delivery, Order
     from backend.db import SessionLocal
@@ -1390,7 +1460,8 @@ def _make_dispatched_order(client):
     """
     order_id, _h = test_create_batch_order(client)
     oid = order_id[0]
-    rest_headers = {"Authorization": "Bearer " + login(client, "spice@foodai.com")["access_token"]}
+    rest_token = login(client, "spice@foodai.com")["access_token"]
+    rest_headers = {"Authorization": f"Bearer {rest_token}"}
     driver_headers = {"Authorization": "Bearer " + login(client, "rider@foodai.com")["access_token"]}
     rider_id = next(
         d["id"]
@@ -1400,6 +1471,8 @@ def _make_dispatched_order(client):
     client.post(
         f"/orders/{oid}/assign", json={"driver_id": rider_id}, headers=rest_headers
     )
+    # The restaurant confirms + prepares; only the dispatch step is the driver's.
+    _advance(client, oid, rest_token, ("CONFIRMED", "PREPARING"))
     resp = client.patch(
         f"/orders/{oid}/status",
         json={"status": "OUT_FOR_DELIVERY"},
