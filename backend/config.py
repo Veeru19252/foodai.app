@@ -120,3 +120,8 @@ CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
     "http://localhost:3000,http://localhost:8501,http://127.0.0.1:3000,http://127.0.0.1:8501",
 ).split(",")
+
+# --- Simulation --------------------------------------------------------
+# How often the delivery simulator advances active deliveries (seconds).
+# Lower is smoother for a demo, higher uses less CPU.
+SIM_INTERVAL_SECONDS = float(os.getenv("SIM_INTERVAL_SECONDS", "2.0"))

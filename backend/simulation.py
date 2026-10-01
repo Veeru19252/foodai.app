@@ -20,6 +20,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Dict, Optional, Set
 
+from backend import config
 from backend.db import SessionLocal
 from backend.models import Delivery, Order, TripLog
 from backend.tracking_state import (
@@ -30,7 +31,9 @@ from backend.tracking_state import (
 
 logger = logging.getLogger("foodai.simulation")
 
-SIM_INTERVAL_SECONDS = 2.0
+# Read from config so the tick rate is tunable per environment instead of
+# being frozen at 2.0s in the source.
+SIM_INTERVAL_SECONDS = config.SIM_INTERVAL_SECONDS
 
 # Kitchen zones mirror the demand-forecast zones (A–E). Used by the
 # kitchen-load simulation so restaurant owners see expected load.
