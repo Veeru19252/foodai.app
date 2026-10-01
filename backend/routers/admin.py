@@ -6,7 +6,8 @@ user listing. Admin is the sole allowed role here.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, joinedload
 
 from backend import security
 from backend.db import get_db
@@ -32,12 +33,15 @@ def overview(user: User = Depends(admin_only), db: Session = Depends(get_db)):
         .filter(Delivery.pickup_time.isnot(None), Delivery.delivered_time.is_(None))
         .count()
     )
-    revenue = db.query(Order).with_entities(Order.total).all()
+    # Summed by the database, not in Python: loading every order's total just
+    # to add them up made this endpoint's memory and time grow with the order
+    # history. COALESCE keeps an empty table at 0.0 rather than None.
+    revenue = db.query(func.coalesce(func.sum(Order.total), 0.0)).scalar()
     return {
         "users": role_counts,
         "orders_by_status": order_status,
         "total_orders": sum(order_status.values()),
-        "revenue": round(sum(r[0] for r in revenue), 2),
+        "revenue": round(revenue or 0.0, 2),
         "active_deliveries": active_deliveries,
         "restaurants": db.query(Restaurant).count(),
         "menu_items": db.query(MenuItem).count(),
@@ -72,7 +76,16 @@ def update_user_role(
 
 @router.get("/orders")
 def all_orders(user: User = Depends(admin_only), db: Session = Depends(get_db)):
-    orders = db.query(Order).order_by(Order.id.desc()).all()
+    # joinedload: customer and restaurant are read for every row below, and
+    # leaving them lazy issued two extra SELECTs per order (401 queries for a
+    # 200-order table). This endpoint is polled by the admin dashboard, so it
+    # is the most visible place that scaling bites.
+    orders = (
+        db.query(Order)
+        .options(joinedload(Order.customer), joinedload(Order.restaurant))
+        .order_by(Order.id.desc())
+        .all()
+    )
     return [
         {
             "id": o.id,
