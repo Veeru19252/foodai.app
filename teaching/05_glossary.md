@@ -12,24 +12,30 @@
 | ---- | ------- | ------------------------ |
 | **FastAPI** | Python web framework with automatic OpenAPI docs and type-based validation. | Every router under `backend/routers/*.py`; app entry in `backend/main.py`. |
 | **Router** | A FastAPI module that groups related endpoints and is mounted on the app with a prefix. | `routers/auth.py`, `orders.py`, `restaurants.py`, `ml.py`, `tracking.py`, `payments.py`, … |
-| **Pydantic** | Python library that validates request/response payloads against declared schemas. | `backend/schemas.py` — `OrderCreate`, `OrderOut`, `PaymentVerify`, … |
+| **Pydantic** | Python library that validates request/response payloads against declared schemas. | `backend/schemas.py` — `CreateOrderRequest`, `OrderOut`, `RazorpayVerifyRequest`, … |
 | **SQLAlchemy** | Python ORM — Python classes become database tables; rows become objects. | `backend/models.py` — `Order`, `Restaurant`, `MenuItem`, `Payment`-on-`Order`, … |
 | **JWT** | JSON Web Token — the signed, self-contained auth token. | `backend/routers/auth.py` issues access + refresh tokens; frontend sends `Authorization: Bearer …`. |
-| **OAuth2 / password flow** | The standard "username + password → token" dance FastAPI supports. | `auth.py` uses `OAuth2PasswordBearer` for login; `get_current_user` dependency protects routes. |
+| **Bearer token** | The standard "credentials in the `Authorization` header" scheme FastAPI supports. | `security.py` uses `HTTPBearer`; `get_current_user` protects routes. (The app takes a JSON login body, not an OAuth2 form.) |
 | **Dependency injection** | FastAPI resolves function parameters (e.g. `db: Session`) automatically per request. | `get_db()` everywhere; `get_current_user` used as a route dependency. |
 | **WebSocket** | Full-duplex connection — server pushes updates without the client polling. | `routers/tracking.py` broadcasts rider positions over `ws/tracking/{order_id}`; the tracking page subscribes. |
-| **Background task** | Work the API kicks off and returns immediately. | Scheduled-order `scheduled_for` kick-off; receipt email sending. |
+| **Background task** | Work the API kicks off and returns immediately. | The rider simulation loop in `main.py`; receipt "email" is currently a log line, not real SMTP. |
 | **CORS** | Browser security policy: which origins may call the API from a page. | Configured in `main.py` so the Next.js dev server can call `127.0.0.1:8000`. |
+| **State machine** | A set of states plus the legal transitions between them; anything not an edge is refused. | `backend/order_state.py` — `ORDER_TRANSITIONS`. `DELIVERED` and `CANCELLED` are terminal. |
+| **Terminal state** | A state with no outgoing transitions. | `DELIVERED`, `CANCELLED` — an order in either can never change status again. |
+| **Idempotency key** | A client-generated token that makes a retried request return the original result instead of repeating the side effect. | `Idempotency-Key` header on `POST /orders` and `POST /orders/batch`; logic in `backend/idempotency.py`. |
+| **Idempotent** | Doing it twice has the same effect as doing it once. | Retrying an order with the same key returns the same order rather than creating a second. |
+| **Atomic transaction** | A group of writes that all commit or all roll back. | A multi-restaurant batch order: every group commits together, or none does. |
+| **Unique constraint** | A database rule forbidding duplicate values in a column (or combination). | `uq_idempotency_user_endpoint_key` — the actual mechanism that blocks a concurrent duplicate order. |
 
 ## Database
 
 | Term | Meaning | Where it lives |
 | ---- | ------- | -------------- |
 | **ORM** | Object-Relational Mapping — tables ↔ objects. | SQLAlchemy models. |
-| **Model / Table** | One class = one table. | `Order`, `Restaurant`, `MenuItem`, `User`, `Coupon`, `Address`, `Review`, `OrderItem`. |
+| **Model / Table** | One class = one table. | `Order`, `Restaurant`, `MenuItem`, `User`, `PromoCode`, `SavedAddress`, `Review`, `OrderItem`, `Delivery`, `OtpCode`, `Notification`, `TripLog`. |
 | **Relationship** | A foreign-key link exposed as a Python attribute. | `order.items`, `order.restaurant`, `restaurant.menu_items`. |
 | **Column constraints** | Rules on a column: nullable, default, max length. | `payment_status` default `"PENDING"`; `delivery_phone` max length 15. |
-| **Migration / seed** | Scripts that create tables and fill starter data. | `backend/init_db.py`, `seed` scripts. |
+| **Migration / seed** | Scripts that create tables and fill starter data. | `backend/seed.py` (idempotent: only seeds when the users table is empty). |
 
 ## Machine Learning (Part 3)
 
@@ -55,19 +61,19 @@
 | **OSRM** | Open-Source Routing Machine — real road-path service. | `routing.get_route()` queries OSRM; falls back to a straight line. |
 | **Haversine** | Great-circle distance formula between two coordinates. | Used for distance fallbacks and straight-line routing. |
 | **Leaflet** | Browser map library. | `components/TrackingMap.tsx` (lazy-loaded). |
-| **TMS / tile layer** | The background map image server. | OpenStreetMap tile layer URL in `TrackingMap.tsx`. |
+| **TMS / tile layer** | The background map image server. | CARTO `dark_all` tile layer in `TrackingMap.tsx`. |
 
 ## Payments (Part 4)
 
 | Term | Meaning | Where it lives |
 | ---- | ------- | -------------- |
-| **COD** | Cash on Delivery — money collected when the food arrives. | `payment_method="COD"`; driver/customer calls `cod/confirm` to mark `PAID`. |
+| **COD** | Cash on Delivery — money collected when the food arrives. | `payment_method="COD"`; the assigned driver (or admin) calls `cod/confirm` after the order is DELIVERED to mark `PAID`. |
 | **Payment intent** | A pre-authorised "I want to charge this much" record with an external id. | `POST /payments/razorpay/order` returns `razorpay_order_id`. |
 | **Razorpay** | Indian payment gateway used in the demo. | `payments.py`; frontend `paymentsApi.razorpayOrder/Verify`. |
 | **HMAC-SHA256** | Keyed hash — the signature algorithm Razorpay uses. | `verify` recomputes `hmac(order_id|payment_id, secret)` and compares. |
 | **Signature** | A digest proving a payment came from the expected client. | `razorpay_signature` in `RazorpayVerifyPayload`. |
-| **Key id / key secret** | The merchant credentials. | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` env vars, with `foodai_demo_*` fallbacks. |
-| **Refund** | Money returned to the customer. | `payment_status="REFUNDED"` (cancellation path after payment). |
+| **Key id / key secret** | The merchant credentials. | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` env vars, with `rzp_test_FoodAI_demo` / `foodai_demo_secret` fallbacks. |
+| **Refund** | Money returned to the customer. | `REFUNDED` is a *valid* `payment_status` value, but no code path sets it yet — refunds are a listed roadmap item. |
 
 ## Frontend (Part 4)
 

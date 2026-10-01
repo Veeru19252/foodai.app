@@ -38,7 +38,7 @@ def get_db():
 
 ---
 
-# `backend/models.py` — every table, every column, every foreign key (modified)
+# `backend/models.py` — the core tables you meet most (the full 12 are in `backend/models.py`) (modified)
 
 The file starts with the allowed-values constants, then defines one class per table.
 

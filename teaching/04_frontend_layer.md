@@ -65,22 +65,24 @@ Next.js App Router still gives us file-based routing and code-splitting for free
 ```ts
 async function api<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
   const token = readStorage(ACCESS_KEY);
-  const headers = new Headers(options.headers);
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
 
   const response = await fetch(`${API_URL}${path}`, { ...options, headers });
 
   if (response.status === 401 && retry) {
     // expired access token → use the refresh token once, then retry
-    const refreshed = await refreshTokens();
+    const refreshed = await tryRefresh();
     if (refreshed) return api<T>(path, options, false);
   }
-  if (!response.ok) throw new Error(...);   // surface the backend detail message
+  if (!response.ok) throw new ApiError(...);   // typed error carrying status + detail
   return response.json();
 }
 ```
 
-The endpoint groups mirror the backend routers **one to one**:
+A `Record<string, string>` (rather than `new Headers(...)`) keeps the header bag JSON-serialisable,
+and failures raise an `ApiError` so pages can branch on `.status` instead of string-matching a
+message. The endpoint groups mirror the backend routers **one to one**:
 
 | Group           | Backend router    | Example calls                                    |
 | --------------- | ----------------- | ------------------------------------------------ |
@@ -94,6 +96,7 @@ The endpoint groups mirror the backend routers **one to one**:
 | `trackingApi`   | tracking.py       | tracking state (REST)                            |
 | `mlApi`         | ml.py             | forecast series, recommendations, order ETA      |
 | `adminApi`      | admin.py          | overview, users, role changes                    |
+| `notificationApi` | notifications.py  | list, mark one read, mark all read               |
 
 **The pattern to learn:** a plain object of closures — `api<T>(path, { method, body })`.
 No axios, no react-query, no generated SDK. TypeScript is the only client-side contract.
@@ -175,7 +178,15 @@ checkout ───┤
 ### Step 1 — checkout collects the choice (`checkout/page.tsx`)
 
 The form gathers delivery details, then a `PaymentMethodPicker`, then contact + locality
-(phone/city/state/pincode). `placeOrder` passes them straight into the create-batch payload:
+(phone/city/state/pincode). Before submit is allowed, two gates must clear:
+
+1. **Phone OTP** — `PhoneOtpVerify` requests `/auth/otp/request` and proves the number with
+   `/auth/otp/verify`, handing back an `otp_token`.
+2. **Location confirmation** — `LocationConfirm` requires the customer to confirm the drop point
+   (address pick, map pin, or "use my GPS"), yielding a lat/lng.
+
+Only then does `placeOrder` build the create-batch payload, and the proof travels with it so the
+backend can re-check it rather than trust the client:
 
 ```tsx
 const res = await ordersApi.createBatch(
@@ -186,9 +197,17 @@ const res = await ordersApi.createBatch(
     delivery_city: city.trim() || undefined,
     delivery_state: stateName.trim() || undefined,
     delivery_pincode: pincode.trim() || undefined,
+    otp_token: otpVerified?.otpToken,       // proof of the OTP gate
+    location_confirmed: locationConfirmed,  // proof of the location gate
+    location_confirm_lat: gps?.lat ?? point.lat,
+    location_confirm_lng: gps?.lng ?? point.lng,
   }))
 );
 ```
+
+All four proof fields are **optional on the schema** (Part 2 lists them) but the order router
+refuses to create the order unless the token verifies and the location was confirmed — an
+unchecked, optional-looking field is exactly the sort of thing an examiner would test.
 
 The backend validates `payment_method` against `{"COD", "RAZORPAY"}` and persists it (Part 2).
 **COD orders are done at this point** — nothing else happens until the driver marks collection.
@@ -198,7 +217,9 @@ The backend validates `payment_method` against `{"COD", "RAZORPAY"}` and persist
 For `RAZORPAY` orders the checkout performs the exact three calls a production checkout would:
 
 ```tsx
-// 1. create the payment intent server-side
+// 1. create the payment intent server-side — NOTE: for EVERY order in the batch,
+//    not just the first. Creating one intent and moving on leaves the rest
+//    permanently PENDING.
 const intent = await paymentsApi.razorpayOrder(order.id);
 //    → { razorpay_order_id: "rp_order_...", amount_paise, key_id, test_mode: true }
 
@@ -249,17 +270,21 @@ Every order row shows a payment badge next to the delivery-status badge:
 )}
 ```
 
-And the action row lets the **customer** mark a COD payment collected (in a real deployment
-this would be the rider's action; the endpoint is the same):
+Collection happens on the **driver's** side, not the customer's — the backend only lets the
+assigned driver (or an admin) collect, and only after the order is DELIVERED (Layer 2's
+`confirm_cod` guards both). So in `driver/page.tsx`, a delivered COD order whose payment is
+still PENDING shows a "Collect cash" button:
 
 ```tsx
-{o.payment_method === "COD" && o.payment_status === "PENDING" && (
-  <button onClick={() => markCodCollected(o.id)}>Mark COD collected</button>
-)}
+{d.order_status === "DELIVERED" &&
+  d.payment_method === "COD" &&
+  d.payment_status === "PENDING" && (
+    <button onClick={() => collectCash(d.order_id)}>Collect cash (₹)</button>
+  )}
 ```
 
-`markCodCollected` calls `paymentsApi.codConfirm(orderId)` → `POST /payments/orders/{id}/cod/confirm`
-→ backend sets `payment_status = "PAID"`, then re-fetches the list so the badge flips to green.
+`collectCash` calls `paymentsApi.codConfirm(orderId)` → `POST /payments/orders/{id}/cod/confirm`
+→ backend sets `payment_status = "PAID"`, then reloads the list so the badge flips to green.
 
 ---
 
@@ -279,7 +304,9 @@ this would be the rider's action; the endpoint is the same):
 
 `tracking/[orderId]/page.tsx`:
 
-1. **REST bootstrap** — `trackingApi.state(orderId)` gives the route, rider position, ETA.
+1. **REST bootstrap** — `trackingApi.state(orderId)` gives the route, rider position, ETA, *and*
+   the pre-computed ETA explanation. The "Why this ETA?" panel renders that embedded
+   explanation; the page does not call `/ml/eta/explain` separately.
 2. **Live WebSocket** — connects to `ws://…/ws/tracking/{id}?token=…`; each `position` frame
    moves the rider marker and advances the progress bar; a `delivered` frame closes the ride.
 3. **ML explainability** — `mlApi.orderPrediction(orderId)` returns the ETA plus SHAP
@@ -326,8 +353,8 @@ checkout/page.tsx  ──createBatch──►  /orders/batch  ──►  one Ord
    └─ RAZORPAY   ──razorpayOrder──► intent ──► simulate signature
                    ──razorpayVerify──► /payments/razorpay/verify ──► payment PAID
 
-orders/page.tsx   ──mine()──► payment badge + "Mark COD collected" per order
-driver/page.tsx   ──driverOrders()──► Navigate ──► tracking/[orderId]
+orders/page.tsx   ──mine()──► payment badge per order (COD collected by the driver)
+driver/page.tsx   ──driverOrders()──► "Collect cash" on delivered COD + Navigate ──► tracking/[orderId]
 tracking page     ──state() + ws ──► TrackingMap (route + rider) + ML ETA + SHAP panel
 ```
 

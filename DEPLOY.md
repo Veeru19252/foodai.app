@@ -7,13 +7,17 @@ to Render via the blueprint in [`render.yaml`](./render.yaml).
 
 ```bash
 # Backend — unit/integration tests
-.venv/bin/python -m pytest -q          # expect 67 passed
+.venv/bin/python -m pytest -q          # expect 87 passed
 
 # Frontend — production build
-cd frontend && npm run build            # expect "Compiled successfully", 16/16 routes
+cd frontend && npm run build            # expect "Compiled successfully", 14 pages + /_not-found
 
 # E2E — Playwright flows (backend :8000 + frontend :3000 running)
-cd frontend && npx playwright test      # expect 4 passed
+# CI uses --grep-invert so it never needs the seeded screenshots run.
+cd frontend && npx playwright test --grep-invert "@screenshots"   # expect 4 passed
+
+# Docs screenshots (regenerates docs/screenshots/*.png) — local only
+cd frontend && npx playwright test e2e/screenshots.spec.ts
 ```
 
 - [ ] `git status` shows a clean tree (model/metrics churn from test runs is

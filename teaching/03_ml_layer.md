@@ -339,8 +339,11 @@ ZONE_COLUMNS = [f"zone_{letter}" for letter in ZONE_LETTERS]
 FULL_COLUMNS = NUMERIC_COLUMNS + ZONE_COLUMNS
 
 ZONE_ANCHORS = {   # reference anchor per zone; a customer point maps to the nearest
-    "A": (12.975, 77.606), "B": (12.982, 77.619), "C": (12.977, 77.596),
-    "D": (13.004, 77.610), "E": (12.970, 77.750),
+    "A": (28.6139, 77.2090),  # New Delhi
+    "B": (19.0760, 72.8777),  # Mumbai
+    "C": (12.9716, 77.5946),  # Bengaluru
+    "D": (17.3850, 78.4867),  # Hyderabad
+    "E": (13.0827, 80.2707),  # Chennai
 }
 
 @lru_cache(maxsize=1)
@@ -650,17 +653,16 @@ import math
 
 BENGALURU_CENTER = (12.9716, 77.5946)
 AVG_SPEED_KMH = 25.0
-COORDINATES = {   # Bengaluru coordinates for restaurants 1-5 (seed order)
-    1: (12.975, 77.606), 2: (12.982, 77.619), 3: (12.977, 77.596),
-    4: (13.004, 77.610), 5: (12.970, 77.750),
+COORDINATES = {   # one anchor per seeded restaurant, keyed by restaurant id (15 entries,
+    ...             # spread across the 9 demo cities — see tracking.py)
 }
+# 1: (12.975, 77.606), 2: (12.982, 77.619), 3: (12.977, 77.596), ...  # first three shown
 DEFAULT_CUSTOMER_HOME = (12.9719, 77.6412)   # Indiranagar fallback
-DELIVERY_PRESETS = [                         # (label, default address, (lat, lng))
-    ("MG Road / Indiranagar", "Hostel Block C, MG Road", (12.9719, 77.6412)),
-    ("Koramangala", "5th Block, Koramangala", (12.9352, 77.6245)),
-    ("HSR Layout", "Sector 1, HSR Layout", (12.9116, 77.6387)),
-    ("Whitefield", "ITPL Main Road, Whitefield", (12.9698, 77.7500)),
-    ("City Center", "MG Road Metro, City Center", (12.9770, 77.5960)),
+DELIVERY_PRESETS = [    # 31 entries: (label, city, default address, (lat, lng))
+    ("MG Road / Indiranagar", "Bengaluru", "Hostel Block C, MG Road", (12.9719, 77.6412)),
+    ("Koramangala", "Bengaluru", "5th Block, Koramangala", (12.9352, 77.6245)),
+    ("HSR Layout", "Bengaluru", "Sector 1, HSR Layout", (12.9116, 77.6387)),
+    ...  # 28 more, covering the other 8 demo cities too
 ]
 
 def restaurant_coordinates(restaurant_id): ...   # dict lookup, ValueError if unknown
@@ -718,7 +720,7 @@ def format_distance(km): return f"{km:.1f} km"
 - **Pure functions, zero dependencies** — every function is deterministic, so the same inputs give the same outputs everywhere (REPL, tests, API, simulator). This is the foundation everything else is built on.
 - **Haversine is the right distance for demo coordinates** — it's spherical great-circle distance; good enough for city-scale (a flat Pythagoras would be fine too, but this is standard and dependency-free).
 - **`interpolate_position` walks cumulative segment lengths** so the marker always sits *on* the route (not as-the-crow-flies between points). At `progress=1.0` it returns `route[-1]` exactly — no off-by-one at the door.
-- **`COORDINATES` keyed by restaurant_id 1-5** matches `seed_data.RESTAURANTS`. No lat/lng columns in the restaurants table — coordinates live here in the legacy spirit of "no schema migration for demo data."
+- **`COORDINATES` keyed by restaurant_id 1-5** matches `seed_data.RESTAURANTS`. Restaurants do carry `lat` / `lng` / `city` columns; the zone is derived from them, not stored as text — coordinates live here in the legacy spirit of "no schema migration for demo data."
 
 **What breaks**
 - `build_route` (straight-line fallback) with `num_points < 2` → division by zero in `steps`; guarded by an explicit `ValueError`.

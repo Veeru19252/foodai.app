@@ -1240,13 +1240,34 @@ def update_order_status(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Advance an order's status. Restaurant owners (and admins) can confirm/
-    dispatch; the assigned driver can start their trip (OUT_FOR_DELIVERY)."""
+    """Advance an order's status along the legal lifecycle graph.
+
+    Restaurant owners (and admins) confirm/prepare/dispatch; the assigned driver
+    starts the trip (OUT_FOR_DELIVERY) and completes it (DELIVERED).
+    """
     if payload.status not in VALID_ORDER_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {payload.status}")
     order = db.query(Order).filter(Order.id == order_id).first()
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found.")
+
+    # Cancellation is NOT reachable here: it lives on POST /orders/{id}/cancel,
+    # which enforces "the customer who owns this order, or an admin". Letting it
+    # through this endpoint let a restaurant cancel a customer's order.
+    if payload.status == "CANCELLED":
+        raise HTTPException(
+            status_code=400,
+            detail="Use POST /orders/{id}/cancel to cancel an order.",
+        )
+    # Only edges in ORDER_TRANSITIONS are legal, so a DELIVERED or CANCELLED
+    # order can never move again (see backend/order_state.py).
+    if not order_state.can_transition(order.status, payload.status):
+        raise HTTPException(
+            status_code=400,
+            detail=order_state.describe_illegal_transition(
+                order.status, payload.status
+            ),
+        )
 
     is_restaurant_owner = (
         user.role == "restaurant"
@@ -1272,8 +1293,19 @@ def update_order_status(
         if not (is_restaurant_owner or is_admin):
             raise HTTPException(status_code=403, detail="Only the restaurant can update this order.")
     else:
-        if not (is_restaurant_owner or is_admin):
-            raise HTTPException(status_code=403, detail="You cannot update this order.")
+        # DELIVERED: only the assigned driver or an admin. COD collection is
+        # gated on DELIVERED, so a restaurant able to set it could unblock cash
+        # collection on an order its rider never dropped off.
+        if payload.status == "DELIVERED":
+            if not (is_assigned_driver or is_admin):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only the assigned driver or an admin can mark this delivered.",
+                )
+        elif not (is_restaurant_owner or is_admin):
+            raise HTTPException(
+                status_code=403, detail="You cannot update this order."
+            )
 
     order.status = payload.status
     # Starting the trip stamps pickup_time so the simulation engine advances
@@ -1535,7 +1567,11 @@ def order_nudge(
 - **Static paths before dynamic.** `GET /drivers`, `/promo/validate`, `/restaurant`, `/driver` are declared *above* `GET /{order_id}`. FastAPI matches in declaration order, so `/drivers` must win over `/{order_id}` — reorder them and "drivers" gets parsed as an order id.
 - **`_create_single_order` shared by single + batch.** Batch (Swiggy multi-restaurant cart) reuses the exact same validation, so a bug fix applies to both paths automatically.
 - **Ownership checks are explicit per endpoint.** Customers see their own, restaurants their own, riders their assigned — via small inline predicates rather than one clever helper, which keeps each rule readable (at the cost of some repetition, accepted deliberately).
-- **The status machine is guarded, not free-form.** `update_order_status` checks *who* may perform *which* transition, and dispatching requires an assigned `Delivery` first. `OUT_FOR_DELIVERY` stamps `pickup_time` — that's the trigger that makes the simulation start moving the rider.
+- **The status machine is a real graph, not a free-form string.** `backend/order_state.py` holds `ORDER_TRANSITIONS`; `update_order_status` refuses any edge that is not in it, so `DELIVERED → PREPARING` and `CANCELLED → OUT_FOR_DELIVERY` are impossible. `DELIVERED` and `CANCELLED` are terminal. Dispatching requires an assigned `Delivery` first, and `OUT_FOR_DELIVERY` stamps `pickup_time` — the trigger that makes the simulation start moving the rider.
+- **Cancellation has exactly one door.** `PATCH /status {"status": "CANCELLED"}` is rejected; cancellation is only `POST /orders/{id}/cancel`, which enforces customer-or-admin. Before this, the generic status endpoint's `else` branch accepted `CANCELLED` for any restaurant owner, bypassing that rule.
+- **`DELIVERED` is driver-or-admin only.** COD collection is gated on `DELIVERED`, so a restaurant that could set it could unblock cash collection on an order its rider never delivered.
+- **Order creation is idempotent when asked.** `POST /orders` and `POST /orders/batch` accept an `Idempotency-Key` header. The key is claimed by an INSERT under a unique constraint, in the *same transaction* as the orders, so a retry after a timeout returns the original order instead of charging twice. See `backend/idempotency.py`.
+- **Batch is all-or-nothing.** `_create_single_order` takes `commit=False` for batch callers, so a failure on the third restaurant group rolls back the first two instead of leaving them placed and charged.
 - **Auto-assign scores `load + 0.5 × distance`.** A rider who is idle but far scores worse than a slightly-busy rider who is close — the classic delivery-platform trade-off, made explicit and tunable.
 - **Nudge reuses the shared ETA** (`eta_for_order`) so the "is this late?" answer is consistent with what the customer sees.
 - **Layer 2 additions**: `payment_method` is validated against the model constants before the order is created, and the structured address fields (phone/city/state/pincode) ride along on create and reorder.
@@ -1544,6 +1580,9 @@ def order_nudge(
 - `POST /payments/razorpay/order` placed before `POST /orders` … no, more precisely: if `/orders/drivers` came *after* `/orders/{order_id}`, `GET /orders/drivers` would 422 (drivers can't be an int).
 - If `batch` didn't share `_create_single_order` → coupon usage (`promo.times_used`) could be incremented twice per cart, or skipped entirely.
 - If `update_order_status` allowed any role to set any status → a customer could mark their order `DELIVERED` without ever receiving it.
+- If `CANCELLED` were reachable through `PATCH /status` → a restaurant owner could cancel a customer's order, sidestepping the ownership check on `POST /cancel`.
+- If the idempotency claim were committed *before* the orders → a crash in between would leave a key promising an order that does not exist, and the retry would get a 409 instead of its order.
+- If `_create_single_order` committed per group → a bad item in the last group of a multi-restaurant cart would leave the earlier orders live and charged.
 - If `assign` didn't check `existing` → re-assigning creates duplicate `Delivery` rows for the same order.
 - If `cancel_order` allowed cancelling `OUT_FOR_DELIVERY` → the simulation would keep moving a rider for a cancelled order (we block it explicitly).
 - If `payment_method` weren't validated → any string lands in the DB; later the payments router would 400 on unknown methods anyway, but it's cheaper to fail at creation.
@@ -1563,9 +1602,10 @@ FoodAI backend - payments router
 Two payment modes, both demo-ready:
 
 1. COD (Cash on Delivery) — *fully working*, no external dependency. The
-   customer picks COD at checkout (``payment_method='COD'``), and when the
-   rider drops the order off, the customer (or an admin) marks the cash as
-   collected -> ``payment_status='PAID'``. Reversing it before collection
+   customer picks COD at checkout (``payment_method='COD'``). When the rider
+   drops the order off, the **assigned driver (or an admin)** marks the cash
+   as collected, and only after the order is DELIVERED ->
+   ``payment_status='PAID'``. Reversing it before collection
    -> ``'FAILED'``. No money ever moves through us.
 
 2. Razorpay — *test-mode interface*. A real deployment would call Razorpay's
@@ -1654,14 +1694,21 @@ def confirm_cod(
 ):
     """Mark a COD order as collected (cash handed to the rider at the door).
 
-    Only valid for COD orders in a collectable state; admin can confirm any
-    COD order, a customer only their own.
+    Only the assigned driver or an admin may collect: the customer is the
+    payer, not the collector. The order must already be DELIVERED so cash is
+    never marked collected before the food arrives.
     """
     order = _get_order(db, order_id)
-    if not _can_manage_payment(user, order):
-        raise HTTPException(status_code=403, detail="You cannot confirm this payment.")
     if order.payment_method != "COD":
         raise HTTPException(status_code=400, detail="This order is not a COD order.")
+    if order.status != "DELIVERED":
+        raise HTTPException(
+            status_code=400, detail="Cash can only be collected after the order is delivered."
+        )
+    is_admin = user.role == "admin"
+    is_assigned_driver = user.role == "delivery" and order.delivery_id == user.id
+    if not (is_admin or is_assigned_driver):
+        raise HTTPException(status_code=403, detail="Only the assigned driver or an admin can collect cash.")
     if order.payment_status not in ("PENDING", "FAILED"):
         raise HTTPException(
             status_code=400, detail=f"Payment already {order.payment_status}."
@@ -1799,8 +1846,8 @@ def payment_status(
 - **Money state lives on the Order row** (columns added in Layer 1). No separate `payments` table → no joins, no sync bugs, and every existing order response can show payment state for free.
 - **The signature verification is the *real* Razorpay algorithm** (`HMAC-SHA256(order_id|payment_id, key_secret)`). In production you'd only swap the key secret env var; the code path is identical. `hmac.compare_digest` is constant-time, which prevents timing attacks on the comparison.
 - **`getattr(config, ...)` keeps the demo green** without polluting `config.py`; setting real env vars later just works.
-- **View vs manage split**: restaurants need to *see* COD collected for their orders but should never *confirm* payments — a clear separation of duties (and a good security boundary).
-- **Guards mirror the order lifecycle** — you can't confirm COD twice, can't "confirm" a Razorpay order as COD, can't pay for a paid order.
+- **Collect vs pay split**: the customer is the *payer* and never the *collector* — only the assigned driver (or an admin) can mark cash collected, and only after the order is DELIVERED. Restaurants can *see* COD collected for their orders but never collect.
+- **Guards mirror the order lifecycle** — you can't collect before DELIVERED, can't confirm COD twice, can't "confirm" a Razorpay order as COD, can't pay for a paid order.
 
 **What breaks**
 - If you called Razorpay's API for real without keys → `RAZORPAY_KEY_SECRET` stays a placeholder and production would silently accept fake signatures. The `test_mode` flag exists precisely so the frontend can display the mode.
@@ -1811,7 +1858,7 @@ def payment_status(
 
 **How this connects**
 - Depends on the `Order` columns from Layer 1 (`payment_method`, `payment_status`, `payment_id`).
-- The frontend checkout flow (Layer 4) will call: create order (COD default) → optionally `POST /payments/razorpay/order` → `POST /payments/razorpay/verify` (or `cod/confirm` after delivery).
+- The frontend checkout flow (Layer 4) will call: create order (COD default) → optionally `POST /payments/razorpay/order` → `POST /payments/razorpay/verify`; for COD the assigned driver calls `cod/confirm` after delivery.
 - Registered in `main.py` under `/payments`.
 
 ---
@@ -1983,7 +2030,7 @@ def health():
 - Validated `payment_method` server-side at order creation and persisted structured address fields (phone/city/state/pincode) on create + reorder.
 - Added a Poisson kitchen-load simulation (`simulation.py`) exposed as `GET /ml/kitchen-load`.
 - Registered `/payments` and fixed the duplicated `addresses.router` mount in `main.py`.
-- Verified: `python3 -m py_compile` passes on every changed file; `backend.main:app` imports cleanly with 63 routes registered (including the 5 new payment routes + kitchen-load).
+- Verified: `python3 -m py_compile` passes on every changed file; `backend.main:app` imports cleanly with 77 app routes — 71 HTTP operations (66 unique paths) plus 2 WebSocket channels.
 
 **Didn't (deliberately, next layers)**
 - Did **not** apply the new Alembic migration to a live Postgres (a concurrent "saved addresses" feature is mid-flight in the repo; we don't want to stomp its DB state). The migration file from Layer 1 is ready: `alembic upgrade head` when the time is right.

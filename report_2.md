@@ -89,9 +89,12 @@ app.include_router(tracking.ws_router)
 app.include_router(ml.router)
 app.include_router(admin.router)
 app.include_router(reviews.router)
+app.include_router(addresses.router)
+app.include_router(payments.router)
+app.include_router(notifications.router)
 ```
 
-- **What it does —** Makes FastAPI aware of every route group. Each router file builds a `router = APIRouter(prefix="/x")`; `include_router` hangs them on the app.
+- **What it does —** Makes FastAPI aware of every route group (11 `include_router` calls; 66 unique HTTP paths plus 2 WebSocket channels). Each router file builds a `router = APIRouter(prefix="/x")`; `include_router` hangs them on the app.
 
 - **Why this way —** Separating routers by concern means `orders.py` only deals with orders. A beginner might put all 30 endpoints in `main.py` for "simplicity" — a classic trap that becomes a 3,000-line unreadable file by week 3.
 
@@ -246,8 +249,9 @@ NUMERIC_COLUMNS = [
     "is_weekend",
     "traffic_factor",
 ]
-ZONES = ["zone_A", "zone_B", "zone_C", "zone_D", "zone_E"]
-FULL_COLUMNS = NUMERIC_COLUMNS + ZONES  # 11 features
+ZONE_LETTERS = ("A", "B", "C", "D", "E")
+ZONE_COLUMNS = [f"zone_{letter}" for letter in ZONE_LETTERS]
+FULL_COLUMNS = NUMERIC_COLUMNS + ZONE_COLUMNS  # 11 features
 ```
 
 - **What it does —** The 11 feature names the ETA model was trained on, in order: 6 numbers + 5 one-hot zone columns (see §3.9 for one-hot). `FULL_COLUMNS` is the contract between training and prediction.
@@ -293,11 +297,11 @@ def predict_eta(dist_km, prep_min, hour, day, weekend, traffic) -> float:
 
 - **What breaks otherwise —** If the code instead raised `FileNotFoundError`, every tracking page would error on machines without the model — a beginner would then catch the error in 20 places, and each catch is another chance to forget one. The `return None` + fallback pattern keeps the failure contained in one function.
 
-- *The `np.array` line* — this converts the Python list into a numpy array, the format XGBoost requires. The `[0.0] * 5` is a shortcut for a 5-zero list (the one-hot block for an unknown/None zone → all zones "off"). No real alternative worth discussing — both numpy and the [0.0]*5 idiom are standard.
+- *The `np.array` line* — this converts the Python list into a numpy array, the format XGBoost requires. No real alternative worth discussing — numpy is the standard input format for XGBoost.
 
 ```python
-# eta_service.py
-def features_for_order(distance_km, prep_time_min, hour, day_of_week, weekend, traffic, zone) -> list:
+# eta_service.py — takes a feature *dict*, returns Optional[float] (None = "no model")
+def features_for_order(restaurant_id, distance_km, prep_time_min, customer_home=None) -> dict:
     """Build the 11-feature vector the model expects: 6 numeric + 5 one-hot zone."""
     one_hot = [1.0 if z == zone else 0.0 for z in ZONES]
     return [distance_km, prep_time_min, hour, day_of_week, weekend, traffic] + one_hot
@@ -328,13 +332,13 @@ def best_eta(order, db):
     return float(model.predict([features])[0])
 ```
 
-- **What it does —** The highest-level ETA function: takes a real `Order` object, pulls out its features, and returns the best ETA we can produce.
+- **What it does —** The highest-level ETA function: takes the computed route + progress, builds the features and returns `(eta_minutes, source)` where `source` says whether ML or the fallback answered — so the UI can label the number honestly.
 
-- **Why this way —** It's a **facade**: callers (tracking page, ML router) don't care whether it's ML or formula — they just call `best_eta(order, db)`. The fallback logic lives here, not in 5 places.
+- **Why this way —** It's a **facade**: callers (tracking snapshot, ML router) don't care whether it's ML or formula — they just call `best_eta(route, progress, restaurant_id, prep_time_min, customer_home)`. The fallback logic lives here, not in 5 places.
 
 - **What breaks otherwise —** If the fallback lived in each caller, the tracking page might use the ML path while the admin dashboard accidentally uses the formula, producing inconsistent ETAs that confuse users.
 
-> **The one thing to double-check before an interview/viva**: why does the one-hot zone block use `[0.0] * 5` in `predict_eta` but real zone details in `features_for_order`/`best_eta`? Because `predict_eta` is the "quick" path when you have no zone (it just says "no zone info → all zones off"); the higher-level functions have the real zone. Both produce identical shapes — 11 numbers — which is what keeps the model happy.
+> **The one thing to double-check before an interview/viva**: `predict_eta` returns `None` (not a number) when the model is missing — why not return a formula-based number right there? Because the fallback needs a *label* too. `best_eta` owns that policy, so `predict_eta` stays a pure "ask the model" function with one obvious job, and the UI can be told which of the two produced the ETA.
 
 ## 4.6 `backend/simulation.py` + `backend/routers/tracking.py` — live tracking
 
