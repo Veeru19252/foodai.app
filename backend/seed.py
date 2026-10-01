@@ -5,10 +5,9 @@ Inserts the same demo users, restaurants + menus, and promo codes into
 PostgreSQL so the API behaves identically to the legacy app.
 """
 
-from hashlib import sha256
-
 from sqlalchemy.orm import Session
 
+from backend import security
 from backend.models import MenuItem, PromoCode, Restaurant, User
 
 # (name, city, address, cuisine, lat, lng, menu)
@@ -140,7 +139,7 @@ PROMOS = [
 
 
 def _hash_password(password: str) -> str:
-    return sha256(password.encode()).hexdigest()
+    return security.hash_password(password)
 
 
 def seed_users(db: Session) -> None:

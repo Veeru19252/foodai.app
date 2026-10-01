@@ -145,6 +145,11 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password.",
         )
+    # Transparently upgrade legacy SHA-256 hashes to Argon2id on a successful
+    # login, so existing accounts migrate without a forced password reset.
+    if security.needs_rehash(user.password_hash):
+        user.password_hash = security.hash_password(payload.password)
+        db.commit()
     return _tokens_for(user)
 
 

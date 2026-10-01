@@ -1,16 +1,19 @@
 """
 FoodAI backend - security helpers
 ==================================
-Password hashing (SHA-256, parity with the legacy app so seeded users keep
-working), JWT access/refresh tokens, and FastAPI auth dependencies with
+Password hashing (Argon2id, with transparent upgrade of legacy SHA-256
+hashes), JWT access/refresh tokens, and FastAPI auth dependencies with
 role-based access control for the four roles.
 """
 
+import hmac
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from typing import Optional
 
 import jwt
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
@@ -24,15 +27,48 @@ _bearer = HTTPBearer(auto_error=False)
 
 ROLE_HIERARCHY = ("customer", "restaurant", "delivery", "admin")
 
+# Argon2id with the library's defaults (time/memory/parallelism tuned for
+# interactive logins). Each digest embeds a random salt, so identical
+# passwords produce different hashes and rainbow tables are useless.
+_password_hasher = PasswordHasher()
+
+
+def _is_legacy_sha256(password_hash: str) -> bool:
+    """True for the old unsalted SHA-256 hex digests (64 hex chars)."""
+    return len(password_hash) == 64 and all(
+        c in "0123456789abcdef" for c in password_hash.lower()
+    )
+
 
 def hash_password(password: str) -> str:
-    """Return the SHA-256 hex digest (legacy-compatible demo hashing)."""
-    return sha256(password.encode()).hexdigest()
+    """Hash a password with Argon2id (random salt embedded in the digest)."""
+    return _password_hasher.hash(password)
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    """Constant-time-ish check (demo scheme; real prod would use bcrypt)."""
-    return sha256(password.encode()).hexdigest() == password_hash
+    """Verify a password against an Argon2id or legacy SHA-256 hash.
+
+    Legacy hashes are still accepted so accounts seeded before the migration
+    keep working; callers should call ``needs_rehash`` and upgrade on success.
+    """
+    if _is_legacy_sha256(password_hash):
+        return hmac.compare_digest(
+            sha256(password.encode()).hexdigest(), password_hash
+        )
+    try:
+        return _password_hasher.verify(password_hash, password)
+    except (VerifyMismatchError, VerificationError, InvalidHashError):
+        return False
+
+
+def needs_rehash(password_hash: str) -> bool:
+    """True when a stored hash should be upgraded (legacy or stale params)."""
+    if _is_legacy_sha256(password_hash):
+        return True
+    try:
+        return _password_hasher.check_needs_rehash(password_hash)
+    except InvalidHashError:
+        return True
 
 
 def _create_token(
