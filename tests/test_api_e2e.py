@@ -360,7 +360,10 @@ def test_ml_forecast_series(client):
 
 
 def test_ml_recommendations(client):
-    # customer@foodai.com has order history by this point -> real scores.
+    # Place an order rather than relying on earlier tests to have done it: this
+    # used to depend on run order and failed when selected on its own with
+    # `pytest -k test_ml_recommendations`.
+    test_create_order_with_promo(client)
     token = login(client, "customer@foodai.com")["access_token"]
     resp = client.get("/ml/recommendations", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
@@ -372,7 +375,17 @@ def test_ml_recommendations(client):
     assert rec["reason"]
     assert "score" in rec
 
-    # A brand-new customer without orders degrades to fallback.
+    # A brand-new customer without orders degrades to fallback. Register here
+    # rather than relying on test_register_unique_user having run first.
+    client.post(
+        "/auth/register",
+        json={
+            "name": "Test User",
+            "email": "test-user@example.com",
+            "password": "password123",
+            "role": "customer",
+        },
+    )
     new_token = login(client, "test-user@example.com")["access_token"]
     resp = client.get(
         "/ml/recommendations", headers={"Authorization": f"Bearer {new_token}"}

@@ -220,8 +220,15 @@ def get_recommendations(
         return {"recommendations": [], "fallback": True}
 
     ordered = Counter(o.restaurant_id for o in orders if o.restaurant_id)
+    # Look cuisines up by id. The nested comprehension this replaces was
+    # orders x restaurants, so a customer with a long history scanning a large
+    # catalog spent hundreds of thousands of iterations in Python on every
+    # recommendation request.
+    cuisine_by_id = {r.id: r.cuisine for r in restaurants}
     cuisine_orders = Counter(
-        r.cuisine for o in orders for r in restaurants if r.id == o.restaurant_id
+        cuisine_by_id[o.restaurant_id]
+        for o in orders
+        if o.restaurant_id in cuisine_by_id
     )
     total_orders = max(1, len(orders))
 
