@@ -43,8 +43,9 @@ class OtpRequestResponse(BaseModel):
     ok: bool
     expires_in: int
     test_mode: bool
-    # Demo-only: without an SMS provider the code is returned so the flow is
-    # usable end-to-end. Production should send the code and omit this field.
+    # Dev-mode only (config.OTP_DEV_MODE): without an SMS provider the code is
+    # returned so the flow is usable end-to-end. In production this is always
+    # null and the code is only sent to the phone.
     dev_code: Optional[str] = None
 
 

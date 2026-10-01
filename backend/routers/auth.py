@@ -79,9 +79,11 @@ def _hash_otp(code: str) -> str:
 
 
 def _dev_code_log(phone: str, code: str) -> None:
-    # No SMS provider in the demo: log the code for manual testing and let the
-    # response carry it so the UI + tests can complete the flow end to end.
-    logger.info("OTP for %s: %s", phone, code)
+    # Only in dev mode: without an SMS provider the code is logged (and
+    # returned) so the flow is usable end to end. In production the code is
+    # sent to the phone and never logged or echoed back.
+    if config.OTP_DEV_MODE:
+        logger.info("OTP for %s: %s", phone, code)
 
 
 def _user_dict(user: User) -> dict:
@@ -178,8 +180,9 @@ def me(user: User = Depends(security.get_current_user)):
 def otp_request(payload: OtpRequest, db: Session = Depends(get_db)):
     """Generate a 6-digit OTP for a phone number (checked at order time).
 
-    Rate-limited per phone (default 60s cooldown). Demo returns the code in
-    the response since there is no SMS provider wired up yet.
+    Rate-limited per phone (default 60s cooldown). In dev mode the code is
+    returned in the response since there is no SMS provider wired up; in
+    production it is only sent to the phone and never echoed back.
     """
     phone = _validate_phone(payload.phone)
 
@@ -213,8 +216,8 @@ def otp_request(payload: OtpRequest, db: Session = Depends(get_db)):
     return OtpRequestResponse(
         ok=True,
         expires_in=config.OTP_CODE_EXPIRE_MINUTES * 60,
-        test_mode=True,
-        dev_code=code,
+        test_mode=config.OTP_DEV_MODE,
+        dev_code=code if config.OTP_DEV_MODE else None,
     )
 
 

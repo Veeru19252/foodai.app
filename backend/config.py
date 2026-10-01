@@ -71,6 +71,11 @@ OTP_JWT_EXPIRE_MINUTES = int(os.getenv("OTP_JWT_EXPIRE_MINUTES", "15"))
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
 OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "60"))
 
+# When on, /auth/otp/request returns the code in the response and logs it so
+# the flow is usable without an SMS provider. MUST be off in production, where
+# the code is only ever sent to the phone and never echoed or logged.
+OTP_DEV_MODE = _env_flag("OTP_DEV_MODE", default=not IS_PRODUCTION)
+
 # CORS origins for the dev frontend (Next.js dev server) and the legacy
 # Streamlit app while it still runs during the transition.
 CORS_ORIGINS = os.getenv(
