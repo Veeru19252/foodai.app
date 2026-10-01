@@ -15,7 +15,6 @@ import asyncio
 import logging
 import math
 import random
-import traceback
 from collections import defaultdict
 from datetime import datetime
 from typing import Dict, Optional, Set
@@ -176,7 +175,16 @@ def _advance_delivery(db, delivery: Delivery) -> Optional[dict]:
 
 
 def advance_all_deliveries(loop: asyncio.AbstractEventLoop) -> None:
-    """Advance every active delivery and publish events (called on a timer)."""
+    """Advance every active delivery and publish events (called on a timer).
+
+    Each delivery is isolated in its own transaction. Postgres aborts the whole
+    transaction when any statement fails, so sharing one session across the tick
+    meant a single bad delivery (a malformed coordinate, a notification that hit
+    a constraint) poisoned the session and silently froze *every other rider* for
+    that tick and every tick after it. Because this runs as a background task,
+    nothing surfaced the failure: the riders just never arrived. Rolling back
+    per delivery means one bad row costs one rider, not the whole fleet.
+    """
     db = SessionLocal()
     try:
         deliveries = (
@@ -184,14 +192,28 @@ def advance_all_deliveries(loop: asyncio.AbstractEventLoop) -> None:
             .filter(Delivery.pickup_time.isnot(None), Delivery.delivered_time.is_(None))
             .all()
         )
-        for delivery in deliveries:
+    except Exception:
+        logger.exception("simulation tick could not load active deliveries")
+        db.close()
+        return
+
+    for delivery in deliveries:
+        delivery_id = delivery.id
+        order_id = delivery.order_id
+        try:
             event = _advance_delivery(db, delivery)
             if event is not None:
-                loop.create_task(manager.publish(delivery.order_id, event))
-    except Exception:
-        logger.exception("simulation tick failed")
-    finally:
-        db.close()
+                loop.create_task(manager.publish(order_id, event))
+        except Exception:
+            # Discard the aborted transaction before touching the next delivery.
+            db.rollback()
+            logger.exception(
+                "simulation failed for delivery %s (order %s); "
+                "continuing with the rest of the tick",
+                delivery_id,
+                order_id,
+            )
+    db.close()
 
 
 async def simulation_loop() -> None:
@@ -206,5 +228,10 @@ async def simulation_loop() -> None:
             # passed explicitly: get_event_loop() in a worker thread would
             # create an unrelated loop that never runs.
             await loop.run_in_executor(None, advance_all_deliveries, loop)
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            traceback.print_exc()
+            # logger.exception, not a bare print: the latter writes to stderr
+            # directly, bypassing the configured handlers, so tick failures were
+            # invisible in any deployed instance.
+            logger.exception("simulation tick raised outside advance_all_deliveries")
