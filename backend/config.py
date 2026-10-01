@@ -86,6 +86,13 @@ LOGIN_WINDOW_SECONDS = int(os.getenv("LOGIN_WINDOW_SECONDS", "300"))
 OTP_VERIFY_MAX_ATTEMPTS = int(os.getenv("OTP_VERIFY_MAX_ATTEMPTS", "10"))
 OTP_VERIFY_WINDOW_SECONDS = int(os.getenv("OTP_VERIFY_WINDOW_SECONDS", "300"))
 
+# Demo data seeding. Off in production so a deployed database never receives
+# the known demo accounts (including the admin). Local dev and tests opt in.
+SEED_DEMO_DATA = _env_flag("SEED_DEMO_DATA", default=not IS_PRODUCTION)
+# Password for the seeded demo accounts. Override in any shared environment;
+# seeding refuses to run in production with the default value.
+DEMO_USER_PASSWORD = os.getenv("DEMO_USER_PASSWORD", "password123")
+
 # CORS origins for the dev frontend (Next.js dev server) and the legacy
 # Streamlit app while it still runs during the transition.
 CORS_ORIGINS = os.getenv(

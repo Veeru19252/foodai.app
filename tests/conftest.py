@@ -11,6 +11,11 @@ import random
 os.environ["DATABASE_URL"] = (
     "postgresql+psycopg2://foodai:foodai_pass@127.0.0.1:5432/foodai_test"
 )
+# Tests run as a non-production environment that seeds demo data and exposes
+# OTP dev codes, matching the local dev experience.
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("SEED_DEMO_DATA", "1")
+os.environ.setdefault("OTP_DEV_MODE", "1")
 # The whole suite shares one TestClient IP and a handful of demo emails, so the
 # production login/OTP throttles would trip on legitimate test traffic. Raise
 # them here; the dedicated rate-limit test lowers them again via monkeypatch.

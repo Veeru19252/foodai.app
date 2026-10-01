@@ -7,7 +7,7 @@ PostgreSQL so the API behaves identically to the legacy app.
 
 from sqlalchemy.orm import Session
 
-from backend import security
+from backend import config, security
 from backend.models import MenuItem, PromoCode, Restaurant, User
 
 # (name, city, address, cuisine, lat, lng, menu)
@@ -143,10 +143,17 @@ def _hash_password(password: str) -> str:
 
 
 def seed_users(db: Session) -> None:
-    for name, email, password, role in USERS:
+    for name, email, _password, role in USERS:
         exists = db.query(User).filter(User.email == email).first()
         if exists is None:
-            db.add(User(name=name, email=email, password_hash=_hash_password(password), role=role))
+            db.add(
+                User(
+                    name=name,
+                    email=email,
+                    password_hash=_hash_password(config.DEMO_USER_PASSWORD),
+                    role=role,
+                )
+            )
 
 
 def seed_restaurants(db: Session) -> None:
@@ -182,11 +189,19 @@ def seed_promos(db: Session) -> None:
 
 
 def seed_if_empty(db: Session) -> bool:
-    """Seed demo data when the users table is empty. Returns True if seeded.
+    """Seed demo data when enabled and the users table is empty.
 
-    Restaurant seeding (and location backfill) always runs so databases that
-    were created before the pan-India rollout pick up the new cities on boot.
+    Returns True if the demo users were seeded. Disabled unless
+    ``SEED_DEMO_DATA`` is on (default off in production), so a deployed
+    database never receives the known demo accounts -- including the admin.
     """
+    if not config.SEED_DEMO_DATA:
+        return False
+    if config.IS_PRODUCTION and config.DEMO_USER_PASSWORD == "password123":
+        raise RuntimeError(
+            "Refusing to seed demo accounts with the default password in "
+            "production. Set DEMO_USER_PASSWORD to a strong value."
+        )
     seeded = False
     if db.query(User).first() is None:
         seed_users(db)
