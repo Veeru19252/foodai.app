@@ -276,22 +276,29 @@ def restaurant_orders(user: User = Depends(restaurant_or_admin), db: Session = D
 
 @router.get("/driver")
 def driver_orders(user: User = Depends(security.require_roles("delivery")), db: Session = Depends(get_db)):
-    deliveries = (
-        db.query(Delivery)
+    # The order, its status and both names are selected alongside the delivery
+    # in one query. This ran db.query(Order) per delivery with the restaurant
+    # and customer read lazily, so a driver's whole delivery list cost several
+    # queries per row. Delivery has no `order` relationship, so the join is
+    # explicit.
+    rows = (
+        db.query(Delivery, Order, Restaurant.name, User.name)
+        .outerjoin(Order, Order.id == Delivery.order_id)
+        .outerjoin(Restaurant, Restaurant.id == Order.restaurant_id)
+        .outerjoin(User, User.id == Order.customer_id)
         .filter(Delivery.driver_id == user.id)
         .order_by(Delivery.id.desc())
         .all()
     )
     result = []
-    for d in deliveries:
-        order = db.query(Order).filter(Order.id == d.order_id).first()
+    for d, order, restaurant_name, customer_name in rows:
         if order is None:
             continue
         result.append({
             "delivery_id": d.id,
             "order_id": order.id,
-            "restaurant_name": order.restaurant.name if order.restaurant else "",
-            "customer_name": order.customer.name if order.customer else "",
+            "restaurant_name": restaurant_name or "",
+            "customer_name": customer_name or "",
             "order_status": order.status,
             "pickup_time": d.pickup_time,
             "delivered_time": d.delivered_time,

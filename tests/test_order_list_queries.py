@@ -195,6 +195,31 @@ def driver_history():
         db.close()
 
 
+def test_driver_orders_does_not_issue_a_query_per_delivery(driver_history):
+    """The active list the driver app polls.
+
+    Same shape as the earnings loop: its own Order query per delivery, with
+    the restaurant and customer read lazily on top.
+    """
+    db, n, driver_id = driver_history
+    rows = orders_router.driver_orders(DriverUser(driver_id), db)
+    assert len(rows) == n
+    queries = _count_queries(
+        db, lambda: orders_router.driver_orders(DriverUser(driver_id), db)
+    )
+    assert queries <= 2, (
+        f"driver_orders issued {queries} queries for {n} deliveries; "
+        "the order, restaurant and customer must be selected in one query"
+    )
+
+
+def test_driver_orders_still_reports_both_names(driver_history):
+    db, n, driver_id = driver_history
+    rows = orders_router.driver_orders(DriverUser(driver_id), db)
+    assert {r["restaurant_name"] for r in rows} == {f"NEDiner {i}" for i in range(n)}
+    assert {r["customer_name"] for r in rows} == {f"NDC{i}" for i in range(n)}
+
+
 def test_driver_earnings_does_not_issue_a_query_per_delivery(driver_history):
     """A driver's history is the longest-lived list in the app.
 
