@@ -6,6 +6,8 @@ role-based access control.
 
 import eta_service
 
+from backend.db import SessionLocal
+from backend.models import Order
 from tests.conftest import login, verify_phone
 
 
@@ -736,6 +738,11 @@ def test_restaurant_offers(client):
 
 def test_restaurant_analytics(client):
     owner_token = login(client, "spice@foodai.com")["access_token"]
+    # Place a real order first. Without one the seeded restaurant has no orders
+    # and every count below is trivially zero, so the assertions would pass
+    # against a broken aggregate.
+    order_id, _ = test_create_order_with_promo(client)
+
     resp = client.get(
         "/restaurants/me/analytics",
         headers={"Authorization": f"Bearer {owner_token}"},
@@ -743,9 +750,24 @@ def test_restaurant_analytics(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["restaurant_name"] == "Spice Garden"
-    assert body["total_orders"] >= 0
-    assert body["revenue"] >= 0
-    assert isinstance(body["orders_by_status"], dict)
+
+    # Cross-check against the database rather than only checking the response
+    # is internally consistent: the endpoint aggregates in SQL now, and a
+    # wrong COUNT or SUM still satisfies `total == sum(status_counts)`.
+    db = SessionLocal()
+    try:
+        restaurant_id = body["restaurant_id"]
+        orders = db.query(Order).filter(Order.restaurant_id == restaurant_id).all()
+        expected_revenue = round(sum(o.total for o in orders), 2)
+        expected_status = {}
+        for o in orders:
+            expected_status[o.status] = expected_status.get(o.status, 0) + 1
+    finally:
+        db.close()
+
+    assert body["total_orders"] == len(orders) > 0
+    assert body["revenue"] == expected_revenue
+    assert body["orders_by_status"] == expected_status
     assert isinstance(body["popular_items"], list)
     assert body["orders_last_7_days"] >= 0
     assert "avg_rating" in body

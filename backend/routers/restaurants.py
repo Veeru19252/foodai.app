@@ -299,13 +299,22 @@ def toggle_offer(
 @router.get("/me/analytics")
 def my_analytics(user: User = Depends(restaurant_only), db: Session = Depends(get_db)):
     restaurant = _own_restaurant(user, db)
-    orders = (
-        db.query(Order).filter(Order.restaurant_id == restaurant.id).order_by(Order.id).all()
+    # Aggregate in SQL. Loading every order row to total and tally in Python
+    # made this endpoint's memory and time grow with the restaurant's whole
+    # order history, to produce three scalars.
+    totals = (
+        db.query(func.count(Order.id), func.coalesce(func.sum(Order.total), 0.0))
+        .filter(Order.restaurant_id == restaurant.id)
+        .first()
     )
-    revenue = round(sum(o.total for o in orders), 2)
-    status_counts = {}
-    for o in orders:
-        status_counts[o.status] = status_counts.get(o.status, 0) + 1
+    total_orders, revenue = int(totals[0] or 0), round(totals[1] or 0.0, 2)
+    status_rows = (
+        db.query(Order.status, func.count(Order.id))
+        .filter(Order.restaurant_id == restaurant.id)
+        .group_by(Order.status)
+        .all()
+    )
+    status_counts = {status: int(count) for status, count in status_rows}
 
     review_row = (
         db.query(func.avg(Review.rating), func.count(Review.id))
@@ -338,7 +347,7 @@ def my_analytics(user: User = Depends(restaurant_only), db: Session = Depends(ge
     return {
         "restaurant_id": restaurant.id,
         "restaurant_name": restaurant.name,
-        "total_orders": len(orders),
+        "total_orders": total_orders,
         "revenue": revenue,
         "orders_by_status": status_counts,
         "avg_rating": round(review_row[0], 2) if review_row and review_row[0] is not None else None,
