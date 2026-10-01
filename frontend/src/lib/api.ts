@@ -100,7 +100,14 @@ export async function api<T>(
   return res.json() as Promise<T>;
 }
 
-async function tryRefresh(): Promise<boolean> {
+// Single-flight guard for token refresh. A dashboard can fire several requests
+// that all 401 at once; without this each would present the same refresh
+// token, and since the server rotates tokens the second one onward would be
+// flagged as a replay and revoke the whole session. Concurrent callers share
+// one in-flight refresh instead.
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function doRefresh(): Promise<boolean> {
   const refreshToken = readStorage(REFRESH_KEY);
   if (!refreshToken) return false;
   try {
@@ -120,6 +127,15 @@ async function tryRefresh(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function tryRefresh(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = doRefresh().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
 }
 
 export function saveAuth(data: AuthResponse) {

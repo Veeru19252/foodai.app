@@ -19,7 +19,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from backend import config, rate_limit, security
+from backend import config, rate_limit, security, token_store
 from backend.db import get_db
 from backend.models import OtpCode, User, VALID_ROLES  # noqa: F401  (VALID_ROLES re-exported)
 from backend.schemas import (
@@ -115,10 +115,12 @@ def _user_dict(user: User) -> dict:
     }
 
 
-def _tokens_for(user: User) -> dict:
+def _tokens_for(user: User, db: Session) -> dict:
+    """Mint an access + refresh pair, recording the refresh token for rotation."""
+    refresh_token, _jti = token_store.issue(db, user)
     return {
         "access_token": security.create_access_token(user.id, user.role),
-        "refresh_token": security.create_refresh_token(user.id, user.role),
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "user": _user_dict(user),
     }
@@ -154,7 +156,9 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
-    return _tokens_for(user)
+    tokens = _tokens_for(user, db)
+    db.commit()
+    return tokens
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -196,11 +200,20 @@ def login(
     if security.needs_rehash(user.password_hash):
         user.password_hash = security.hash_password(payload.password)
         db.commit()
-    return _tokens_for(user)
+    tokens = _tokens_for(user, db)
+    db.commit()
+    return tokens
 
 
 @router.post("/refresh", response_model=TokenResponse)
 def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
+    """Exchange a refresh token for a new pair, rotating the old one.
+
+    A token is good for exactly one use. Presenting one that was already
+    rotated means it leaked, so every live token for that user is revoked and
+    the caller must log in again — this is what makes a stolen token
+    self-defeating instead of a 7-day backdoor.
+    """
     token = payload.refresh_token
     parsed = security.decode_refresh_token(token)
     if parsed is None:
@@ -209,10 +222,33 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
         user_id = int(parsed["sub"])
     except (KeyError, TypeError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid refresh token.")
+    jti = parsed.get("jti")
+    if not isinstance(jti, str) or not jti:
+        # A refresh token with no server-side record predates rotation.
+        raise HTTPException(status_code=401, detail="Invalid refresh token.")
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise HTTPException(status_code=401, detail="User no longer exists.")
-    return _tokens_for(user)
+
+    try:
+        previous = token_store.rotate(db, jti)
+    except token_store.ReuseDetected as exc:
+        token_store.revoke_all_for_user(db, exc.user_id)
+        db.commit()
+        raise HTTPException(
+            status_code=401,
+            detail="Refresh token reuse detected. Please log in again.",
+        )
+    if previous is None:
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
+
+    tokens = _tokens_for(user, db)
+    previous.replaced_by = security.decode_refresh_token(
+        tokens["refresh_token"]
+    )["jti"]
+    db.commit()
+    return tokens
 
 
 @router.get("/me")

@@ -28,7 +28,7 @@ def _fresh_phone() -> str:
 # ---- typed JWTs ----
 
 def test_decode_access_token_rejects_refresh_token():
-    refresh = security.create_refresh_token(1, "customer")
+    refresh = security.create_refresh_token(1, "customer", "test-jti-1")
     access = security.create_access_token(1, "customer")
 
     assert security.decode_access_token(refresh) is None
@@ -49,6 +49,58 @@ def test_refresh_token_rejected_as_access(client):
         "/auth/me", headers={"Authorization": f"Bearer {tokens['refresh_token']}"}
     )
     assert resp.status_code == 401, resp.text
+
+
+# ---- refresh-token rotation + reuse detection ----
+
+def test_refresh_rotates_the_token(client):
+    first = login(client)["refresh_token"]
+    resp = client.post("/auth/refresh", json={"refresh_token": first})
+    assert resp.status_code == 200, resp.text
+    second = resp.json()["refresh_token"]
+    assert second != first, "refresh must return a different token"
+
+
+def test_used_refresh_token_cannot_be_reused(client):
+    first = login(client)["refresh_token"]
+    assert client.post("/auth/refresh", json={"refresh_token": first}).status_code == 200
+    # Presenting it again is a replay.
+    resp = client.post("/auth/refresh", json={"refresh_token": first})
+    assert resp.status_code == 401, resp.text
+    assert "reuse" in resp.json()["detail"].lower()
+
+
+def test_reuse_revokes_the_whole_family(client):
+    """A replayed token invalidates every live token for that user."""
+    first = login(client)["refresh_token"]
+    second = client.post("/auth/refresh", json={"refresh_token": first}).json()[
+        "refresh_token"
+    ]
+    # Replay the already-rotated token.
+    assert (
+        client.post("/auth/refresh", json={"refresh_token": first}).status_code == 401
+    )
+    # The current token is now dead too, so the user must log in again.
+    resp = client.post("/auth/refresh", json={"refresh_token": second})
+    assert resp.status_code == 401, resp.text
+
+
+def test_unknown_refresh_token_rejected(client):
+    import uuid
+
+    forged = security.create_refresh_token(1, "customer", uuid.uuid4().hex)
+    resp = client.post("/auth/refresh", json={"refresh_token": forged})
+    assert resp.status_code == 401, resp.text
+
+
+def test_login_issues_a_distinct_refresh_token(client):
+    """Each login records its own row, so two sessions do not clobber each other."""
+    a = login(client)["refresh_token"]
+    b = login(client)["refresh_token"]
+    assert a != b
+    # Both still work: rotating one does not revoke the other.
+    assert client.post("/auth/refresh", json={"refresh_token": a}).status_code == 200
+    assert client.post("/auth/refresh", json={"refresh_token": b}).status_code == 200
 
 
 # ---- password storage ----

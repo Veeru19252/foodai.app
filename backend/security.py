@@ -72,7 +72,11 @@ def needs_rehash(password_hash: str) -> bool:
 
 
 def _create_token(
-    subject: str, role: str, expires_delta: timedelta, token_type: str
+    subject: str,
+    role: str,
+    expires_delta: timedelta,
+    token_type: str,
+    jti: Optional[str] = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     payload = {
@@ -84,6 +88,10 @@ def _create_token(
         "iat": now,
         "exp": now + expires_delta,
     }
+    if jti is not None:
+        # Refresh tokens carry a server-recorded id, so a presented token can
+        # be traced to one login and revoked when it is replayed.
+        payload["jti"] = jti
     return jwt.encode(payload, config.JWT_SECRET, algorithm=config.JWT_ALGORITHM)
 
 
@@ -96,12 +104,13 @@ def create_access_token(user_id: int, role: str) -> str:
     )
 
 
-def create_refresh_token(user_id: int, role: str) -> str:
+def create_refresh_token(user_id: int, role: str, jti: str) -> str:
     return _create_token(
         str(user_id),
         role,
         timedelta(days=config.REFRESH_TOKEN_EXPIRE_DAYS),
         "refresh",
+        jti=jti,
     )
 
 

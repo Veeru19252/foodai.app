@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend import config, idempotency, rate_limit, simulation
+from backend import config, idempotency, rate_limit, simulation, token_store
 from backend.db import Base, SessionLocal, engine
 from backend import models  # noqa: F401  (register tables on Base.metadata)
 from backend import seed
@@ -53,6 +53,9 @@ async def lifespan(app: FastAPI):
             stale = rate_limit.purge_old(db)
             if stale:
                 logger.info("purged %d stale rate-limit windows", stale)
+            expired = token_store.purge_expired(db)
+            if expired:
+                logger.info("purged %d expired refresh tokens", expired)
         except Exception:
             # A failed sweep must never stop the API from starting.
             logger.exception("startup purge failed; continuing")

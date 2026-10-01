@@ -69,6 +69,27 @@ class User(Base):
     deliveries = relationship("Delivery", back_populates="driver")
 
 
+class RefreshToken(Base):
+    """Server-side record of every issued refresh token (rotation + reuse).
+
+    A refresh token carries a ``jti`` claim; this table is what makes the
+    token revocable. Each use rotates it (revoke the old row, issue a new
+    one), and presenting an already-rotated token is treated as a replay:
+    the whole set for that user is revoked and a fresh login is required.
+    """
+
+    __tablename__ = "refresh_tokens"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    jti = Column(String(64), nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    revoked = Column(Boolean, nullable=False, default=False)
+    # jti of the token that replaced this one, for audit/debugging.
+    replaced_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class Restaurant(Base):
     __tablename__ = "restaurants"
 

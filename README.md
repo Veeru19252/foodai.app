@@ -95,7 +95,7 @@ A Swiggy-style food delivery platform with **real-time tracking** and **machine 
 | Maps | **Leaflet + react-leaflet** via dynamic import | Free interactive map, no API key |
 | Real-time | **WebSocket** + REST polling fallback | True push with graceful degradation |
 | Backend | **FastAPI** (uvicorn) | Async, typed, auto OpenAPI docs at `/docs` |
-| Auth | **JWT** (access + refresh, PyJWT, bcrypt) | Stateless, role-scoped |
+| Auth | **JWT** (access + rotating refresh, PyJWT) + **Argon2id** | Role-scoped, revocable sessions |
 | ORM / migrations | **SQLAlchemy 2.0** + **Alembic** | Typed models, versioned schema |
 | Database | **PostgreSQL 16** | Real relational DB with FK constraints |
 | ML | **XGBoost** · scikit-learn · pandas | Gradient boosting for ETA + demand |
@@ -295,7 +295,7 @@ Interactive docs: `http://localhost:8000/docs`.
 |---|---|---|
 | `POST` | `/api/auth/register` | Create an account. Self-registration is limited to `customer` / `restaurant` / `delivery`; `admin` is rejected with `403` |
 | `POST` | `/api/auth/login` | Returns access + refresh tokens |
-| `POST` | `/api/auth/refresh` | Exchange a refresh token |
+| `POST` | `/api/auth/refresh` | Exchange a refresh token. Rotates it; presenting a rotated token revokes every live token for that user (`401`) |
 | `GET` | `/api/auth/me` | The currently authenticated user |
 | `POST` | `/api/auth/otp/request` · `/verify` | Phone OTP for the pre-order gate |
 
@@ -553,6 +553,15 @@ are visible rather than implied.
 **Implemented**
 - **JWT access + refresh tokens**, with the decode algorithm pinned to
   `HS256` (never taken from the token itself) and `exp` enforced on every read.
+  Tokens carry a `type` claim, so a refresh token can never be replayed as an
+  access token.
+- **Refresh-token rotation with reuse detection.** Each refresh token is
+  recorded server-side by its `jti` and is good for exactly one use. Presenting
+  an already-rotated token means it leaked, so every live token for that user
+  is revoked and a fresh login is required. The client serialises concurrent
+  refreshes so parallel `401`s do not look like a replay.
+- **Argon2id password hashing** (per-password salt), with transparent upgrade
+  of legacy unsalted SHA-256 hashes on successful login.
 - **Role-scoped authorization.** Admin-only routes depend on
   `security.require_roles("admin")` (bound to `admin_only` in the router), not
   on the client hiding links.
