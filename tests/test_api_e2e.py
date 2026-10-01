@@ -267,13 +267,28 @@ def test_restaurant_full_lifecycle(client):
 
 
 def test_customer_cannot_confirm_order(client):
+    """A customer may not drive the order into CONFIRMED.
+
+    Uses a freshly created order rather than a hardcoded id: the route checks
+    the lifecycle transition *before* the actor's role, so an order that is no
+    longer in PLACED would answer 400 instead of 403 and the test would pass or
+    fail for the wrong reason.
+    """
+    order_ids, _headers = test_create_batch_order(client)
+    order_id = order_ids[0]
     token = login(client, "customer@foodai.com")["access_token"]
     resp = client.patch(
-        "/orders/1/status",
+        f"/orders/{order_id}/status",
         json={"status": "CONFIRMED"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 403, resp.text
+    # And the order was not actually moved.
+    rest_token = login(client, "spice@foodai.com")["access_token"]
+    detail = client.get(
+        f"/orders/{order_id}", headers={"Authorization": f"Bearer {rest_token}"}
+    )
+    assert detail.json()["status"] == "PLACED"
 
 
 def test_tracking_access_control(client):
