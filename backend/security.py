@@ -35,11 +35,16 @@ def verify_password(password: str, password_hash: str) -> bool:
     return sha256(password.encode()).hexdigest() == password_hash
 
 
-def _create_token(subject: str, role: str, expires_delta: timedelta) -> str:
+def _create_token(
+    subject: str, role: str, expires_delta: timedelta, token_type: str
+) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": subject,
         "role": role,
+        # Distinguishes access from refresh tokens so a long-lived refresh
+        # token can never be replayed as a short-lived access token.
+        "type": token_type,
         "iat": now,
         "exp": now + expires_delta,
     }
@@ -48,13 +53,19 @@ def _create_token(subject: str, role: str, expires_delta: timedelta) -> str:
 
 def create_access_token(user_id: int, role: str) -> str:
     return _create_token(
-        str(user_id), role, timedelta(minutes=config.ACCESS_TOKEN_EXPIRE_MINUTES)
+        str(user_id),
+        role,
+        timedelta(minutes=config.ACCESS_TOKEN_EXPIRE_MINUTES),
+        "access",
     )
 
 
 def create_refresh_token(user_id: int, role: str) -> str:
     return _create_token(
-        str(user_id), role, timedelta(days=config.REFRESH_TOKEN_EXPIRE_DAYS)
+        str(user_id),
+        role,
+        timedelta(days=config.REFRESH_TOKEN_EXPIRE_DAYS),
+        "refresh",
     )
 
 
@@ -91,6 +102,26 @@ def decode_token(token: str) -> Optional[dict]:
         return None
 
 
+def decode_access_token(token: str) -> Optional[dict]:
+    """Decode a JWT and require it to be an access token.
+
+    Refresh tokens carry ``type="refresh"`` and are rejected here, so a stolen
+    refresh token cannot be used directly against authenticated endpoints.
+    """
+    payload = decode_token(token)
+    if payload is None or payload.get("type") != "access":
+        return None
+    return payload
+
+
+def decode_refresh_token(token: str) -> Optional[dict]:
+    """Decode a JWT and require it to be a refresh token."""
+    payload = decode_token(token)
+    if payload is None or payload.get("type") != "refresh":
+        return None
+    return payload
+
+
 def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
     db: Session = Depends(get_db),
@@ -103,7 +134,7 @@ def get_current_user(
     )
     if credentials is None:
         raise unauthorized
-    payload = decode_token(credentials.credentials)
+    payload = decode_access_token(credentials.credentials)
     if payload is None:
         raise unauthorized
     try:
@@ -127,7 +158,7 @@ def get_current_user_optional(
     """
     if credentials is None:
         return None
-    payload = decode_token(credentials.credentials)
+    payload = decode_access_token(credentials.credentials)
     if payload is None:
         return None
     try:

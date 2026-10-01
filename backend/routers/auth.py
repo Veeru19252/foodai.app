@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from backend import config, security
 from backend.db import get_db
-from backend.models import OtpCode, User, VALID_ROLES
+from backend.models import OtpCode, User, VALID_ROLES  # noqa: F401  (VALID_ROLES re-exported)
 from backend.schemas import (
     LoginRequest,
     OtpRequest,
@@ -32,6 +32,12 @@ from backend.schemas import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Roles an unauthenticated visitor may sign up as. Deliberately a subset of
+# VALID_ROLES: `admin` is excluded so the public register endpoint can never
+# mint a privileged account. Restaurant/delivery partners are legitimate
+# self-registrants, so they stay.
+SELF_REGISTER_ROLES = ("customer", "restaurant", "delivery")
 
 logger = logging.getLogger("foodai.otp")
 
@@ -100,8 +106,23 @@ def _tokens_for(user: User) -> dict:
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
-    if payload.role not in VALID_ROLES:
-        raise HTTPException(status_code=400, detail=f"Invalid role: {payload.role}")
+    """Create a new account.
+
+    This endpoint is unauthenticated, so the requested role is *never* trusted.
+    A caller that could pick its own role could simply ask for ``admin`` and
+    walk straight into the admin-only endpoints, so registration is restricted
+    to the roles a stranger may legitimately sign up as. ``admin`` is reachable
+    only by seeding (``backend/seed.py``) or by an authenticated admin via
+    ``PATCH /admin/users/{user_id}/role``.
+    """
+    if payload.role not in SELF_REGISTER_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Cannot register as '{payload.role}'. "
+                f"Self-registration is limited to: {', '.join(SELF_REGISTER_ROLES)}."
+            ),
+        )
     if db.query(User).filter(User.email == payload.email.lower()).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
     user = User(
@@ -130,7 +151,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 @router.post("/refresh", response_model=TokenResponse)
 def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
     token = payload.refresh_token
-    parsed = security.decode_token(token)
+    parsed = security.decode_refresh_token(token)
     if parsed is None:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
     try:

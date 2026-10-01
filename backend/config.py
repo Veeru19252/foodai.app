@@ -25,6 +25,21 @@ def _normalize_database_url(url: str) -> str:
     return url
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    """Parse a boolean environment variable (``1``/``true``/``yes``/``on``)."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+# Deployment environment. Anything other than "production"/"prod" is treated as
+# a development environment where the local defaults below are allowed. Set
+# ENVIRONMENT=production on Render/Railway so the fail-fast guards engage.
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").strip().lower()
+IS_PRODUCTION = ENVIRONMENT in ("production", "prod")
+
+
 # Local development PostgreSQL (see brew install postgresql@16, DB created with
 # user foodai / password foodai_pass). Override with DATABASE_URL in prod.
 DATABASE_URL = _normalize_database_url(
@@ -34,8 +49,17 @@ DATABASE_URL = _normalize_database_url(
     )
 )
 
-JWT_SECRET = os.getenv("JWT_SECRET", "foodai-dev-secret-change-me")
+_DEFAULT_JWT_SECRET = "foodai-dev-secret-change-me"
+JWT_SECRET = os.getenv("JWT_SECRET", _DEFAULT_JWT_SECRET)
 JWT_ALGORITHM = "HS256"
+
+# Fail fast rather than silently signing tokens with a public default. A
+# deployment that forgets JWT_SECRET must not start with a forgeable secret.
+if IS_PRODUCTION and (JWT_SECRET == _DEFAULT_JWT_SECRET or len(JWT_SECRET) < 32):
+    raise RuntimeError(
+        "JWT_SECRET must be set to a random value of at least 32 characters "
+        "when ENVIRONMENT=production."
+    )
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 

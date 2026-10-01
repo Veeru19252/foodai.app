@@ -66,7 +66,7 @@ def get_tracking(
 @ws_router.websocket("/ws/tracking/{order_id}")
 async def ws_tracking(websocket: WebSocket, order_id: int):
     token = websocket.query_params.get("token")
-    payload = security.decode_token(token) if token else None
+    payload = security.decode_access_token(token) if token else None
     if payload is None:
         await websocket.close(code=4401)
         return
@@ -122,7 +122,7 @@ async def ws_notifications(websocket: WebSocket):
     """Per-user notification channel (e.g. drivers receive delivery_assigned
     events). Auth via ``?token=`` like the tracking socket."""
     token = websocket.query_params.get("token")
-    payload = security.decode_token(token) if token else None
+    payload = security.decode_access_token(token) if token else None
     if payload is None:
         await websocket.close(code=4401)
         return
