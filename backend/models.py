@@ -365,6 +365,13 @@ class SavedAddress(Base):
     address = Column(String(255), nullable=False)
     lat = Column(Float, nullable=True)
     lng = Column(Float, nullable=True)
+    # Region fields exist on the live saved_addresses table but were never
+    # declared in the model, so `alembic check` reported them as removable
+    # and a fresh DB created from metadata would have differed from one
+    # built by migrations. Declared (and migrated) so the two agree.
+    city = Column(String(64), nullable=True)
+    state = Column(String(64), nullable=True)
+    pincode = Column(String(10), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     user = relationship("User")
