@@ -58,7 +58,9 @@ class FakeOrder:
 @pytest.fixture(autouse=True)
 def fixed_route(monkeypatch):
     """Pin the route so the projection math is deterministic and offline."""
-    monkeypatch.setattr(ts, "order_route", lambda order: (ROUTE, ROUTE_KM))
+    monkeypatch.setattr(
+        ts, "order_route", lambda order, restaurant_point=None: (ROUTE, ROUTE_KM)
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -233,19 +235,21 @@ def test_progress_is_clamped_to_the_unit_interval():
 
 def test_progress_is_zero_when_the_route_has_no_length(monkeypatch):
     """A degenerate route (rider still at pickup) yields 0, not a division error."""
-    monkeypatch.setattr(ts, "order_route", lambda order: (((18.5, 73.0),), 0.0))
+    monkeypatch.setattr(
+        ts, "order_route", lambda order, restaurant_point=None: (((18.5, 73.0),), 0.0)
+    )
     assert ts.progress_at_position(FakeOrder(), 18.5, 73.0) == 0.0
 
 
 def test_progress_is_zero_for_an_empty_route(monkeypatch):
-    monkeypatch.setattr(ts, "order_route", lambda order: ((), 0.0))
+    monkeypatch.setattr(ts, "order_route", lambda order, restaurant_point=None: ((), 0.0))
     assert ts.progress_at_position(FakeOrder(), 18.5, 73.0) == 0.0
 
 
 def test_route_with_a_duplicate_point_does_not_divide_by_zero(monkeypatch):
     """Two identical vertices have zero length; that segment must be skipped."""
     dup = ((18.5, 73.0), (18.5, 73.0), (18.5, 73.1))
-    monkeypatch.setattr(ts, "order_route", lambda order: (dup, 11.1))
+    monkeypatch.setattr(ts, "order_route", lambda order, restaurant_point=None: (dup, 11.1))
     value = ts.progress_at_position(FakeOrder(), 18.5, 73.05)
     assert not math.isnan(value)
     assert 0.0 <= value <= 1.0

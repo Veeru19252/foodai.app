@@ -101,15 +101,24 @@ def live_driver_position(order: Order) -> Optional[Tuple[float, float]]:
     return (order.driver_lat, order.driver_lng)
 
 
-def progress_at_position(order: Order, lat: float, lng: float) -> float:
+def progress_at_position(
+    order: Order,
+    lat: float,
+    lng: float,
+    restaurant_point: Optional[Tuple[float, float]] = None,
+) -> float:
     """Estimate 0..1 progress from a live GPS fix against the road route.
 
     Projects the fix onto the nearest route *segment* (not just the nearest
     vertex), so successive GPS fixes move the progress smoothly and the ETA
     never jumps between vertices. Falls back to 0.0 when the route has no
     length (e.g. the rider has not left the pickup yet).
+
+    ``restaurant_point`` is forwarded to ``order_route`` so a caller that has
+    already selected the coordinates (the simulation tick) does not trigger a
+    lazy restaurant load per fix.
     """
-    route, _ = order_route(order)
+    route, _ = order_route(order, restaurant_point)
     if not route or len(route) < 2:
         return 0.0
     point = (lat, lng)
@@ -148,18 +157,23 @@ def progress_at_position(order: Order, lat: float, lng: float) -> float:
 
 
 def rider_progress(
-    order: Order, delivery: Optional[Delivery]
+    order: Order,
+    delivery: Optional[Delivery],
+    restaurant_point: Optional[Tuple[float, float]] = None,
 ) -> Tuple[float, Tuple[float, float]]:
     """Return (progress 0..1, rider position) for a delivery.
 
     Before pickup the rider sits at the restaurant (progress 0). Afterwards
     progress is elapsed time over the trip estimate, walking the road route so
     the marker makes real turns.
+
+    ``restaurant_point`` lets the simulation tick pass coordinates it already
+    selected for the whole fleet, avoiding a lazy restaurant load per rider.
     """
-    start = restaurant_start(order)
+    start = restaurant_start(order, restaurant_point)
     if delivery is None or delivery.pickup_time is None:
         return 0.0, start
-    route, _ = order_route(order)
+    route, _ = order_route(order, restaurant_point)
     pickup_epoch = _to_epoch_utc(delivery.pickup_time)
     elapsed = time.time() - pickup_epoch
     total_seconds = tracking.estimate_trip_seconds(list(route), tracking.AVG_SPEED_KMH)

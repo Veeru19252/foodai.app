@@ -21,7 +21,7 @@ from typing import Dict, Optional, Set
 
 from backend import config
 from backend.db import SessionLocal
-from backend.models import Delivery, Order, TripLog
+from backend.models import Delivery, Order, Restaurant, TripLog
 from backend.tracking_state import (
     live_driver_position,
     progress_at_position,
@@ -128,23 +128,38 @@ def publish_sync(manager_: ConnectionManager, channel, message: dict) -> None:
         )
 
 
-def _advance_delivery(db, delivery: Delivery) -> Optional[dict]:
-    """Advance one delivery one tick; return an event dict to publish (or None)."""
+def _advance_delivery(
+    db, delivery: Delivery, restaurant_point=None
+) -> Optional[dict]:
+    """Advance one delivery one tick; return an event dict to publish (or None).
+
+    ``restaurant_point`` is the restaurant's (lat, lng) when the caller already
+    selected it for the whole tick. Passing it avoids a lazy restaurant load
+    per rider; when it is None the helpers fall back to loading the row.
+    """
     order = db.query(Order).filter(Order.id == delivery.order_id).first()
     if order is None or order.status != "OUT_FOR_DELIVERY":
         return None
-    progress, rider_pos = rider_progress(order, delivery)
+    progress, rider_pos = rider_progress(order, delivery, restaurant_point)
     # When the driver is sharing live GPS, publish their real position instead
     # of the simulated rider so the customer marker never jumps backwards.
     live = live_driver_position(order)
     if live is not None:
         rider_pos = live
-        progress = progress_at_position(order, live[0], live[1])
+        progress = progress_at_position(order, live[0], live[1], restaurant_point)
     db.add(TripLog(delivery_id=delivery.id, lat=rider_pos[0], lng=rider_pos[1]))
     delivered = progress >= 1.0
+    # Capture the payload fields before committing. commit() expires the
+    # instance, so reading order.id/status/delivery_address afterwards issued a
+    # redundant SELECT of the order row on every tick.
+    order_id = order.id
+    customer_id = order.customer_id
+    delivery_address = order.delivery_address
     if delivered:
         delivery.delivered_time = datetime.utcnow()
         order.status = "DELIVERED"
+    status = order.status
+    if delivered:
         try:
             # Lazy import: notifications imports this module at the top, so a
             # module-level import here would be circular. Notify the customer
@@ -154,24 +169,49 @@ def _advance_delivery(db, delivery: Delivery) -> Optional[dict]:
 
             notify(
                 db,
-                order.customer_id,
+                customer_id,
                 "order_update",
-                f"Order #{order.id} Delivered",
+                f"Order #{order_id} Delivered",
                 "Your order has been delivered. Enjoy!",
-                order.id,
+                order_id,
             )
         except Exception:  # notification must never break the sim loop
-            logger.exception("failed to notify delivered order %s", order.id)
+            logger.exception("failed to notify delivered order %s", order_id)
     db.commit()
     return {
         "type": "delivered" if delivered else "position",
-        "order_id": order.id,
-        "status": order.status,
+        "order_id": order_id,
+        "status": status,
         "lat": round(rider_pos[0], 6),
         "lng": round(rider_pos[1], 6),
         "progress": round(progress, 4),
-        "delivery_address": order.delivery_address,
+        "delivery_address": delivery_address,
     }
+
+
+def _restaurant_points(db) -> Dict[int, tuple]:
+    """Return {order_id: (lat, lng)} for every active delivery's restaurant.
+
+    One query for the whole fleet, so the tick does not pay a lazy restaurant
+    load per rider. Only plain tuples are kept: ORM instances loaded here would
+    be expired by the first per-delivery commit and reloaded anyway. Restaurants
+    without coordinates are omitted, so ``restaurant_start`` falls back exactly
+    as it would have.
+    """
+    rows = (
+        db.query(Order.id, Restaurant.lat, Restaurant.lng)
+        .join(Delivery, Delivery.order_id == Order.id)
+        .join(Restaurant, Restaurant.id == Order.restaurant_id)
+        .filter(
+            Delivery.pickup_time.isnot(None),
+            Delivery.delivered_time.is_(None),
+            Order.status == "OUT_FOR_DELIVERY",
+            Restaurant.lat.isnot(None),
+            Restaurant.lng.isnot(None),
+        )
+        .all()
+    )
+    return {order_id: (lat, lng) for order_id, lat, lng in rows}
 
 
 def advance_all_deliveries(loop: asyncio.AbstractEventLoop) -> None:
@@ -186,6 +226,13 @@ def advance_all_deliveries(loop: asyncio.AbstractEventLoop) -> None:
     per delivery means one bad row costs one rider, not the whole fleet.
     """
     db = SessionLocal()
+    # This session is a self-contained batch job: it loads the active fleet,
+    # advances each rider in its own transaction, and never reads an object
+    # again after committing it. Expiring on commit made every per-delivery
+    # commit invalidate the whole `deliveries` list, so the next iteration's
+    # `delivery.id`/`delivery.order_id` re-selected the row -- one wasted SELECT
+    # per rider per tick. Nothing here depends on post-commit refresh.
+    db.expire_on_commit = False
     try:
         deliveries = (
             db.query(Delivery)
@@ -197,11 +244,23 @@ def advance_all_deliveries(loop: asyncio.AbstractEventLoop) -> None:
         db.close()
         return
 
+    # One query for every restaurant the tick will touch, so each rider does not
+    # pay a lazy restaurant load. A failure here is non-fatal -- the tick
+    # proceeds with lazy loads.
+    try:
+        restaurant_points = _restaurant_points(db)
+    except Exception:
+        db.rollback()
+        logger.exception("simulation tick could not preload restaurant points")
+        restaurant_points = {}
+
     for delivery in deliveries:
         delivery_id = delivery.id
         order_id = delivery.order_id
         try:
-            event = _advance_delivery(db, delivery)
+            event = _advance_delivery(
+                db, delivery, restaurant_points.get(order_id)
+            )
             if event is not None:
                 loop.create_task(manager.publish(order_id, event))
         except Exception:
