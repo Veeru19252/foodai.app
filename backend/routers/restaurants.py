@@ -11,7 +11,7 @@ management, offer, and analytics dashboards. These are registered before the
 """
 
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Optional, Sequence
 
 import tracking
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -28,17 +28,25 @@ router = APIRouter(prefix="/restaurants", tags=["restaurants"])
 restaurant_only = security.require_roles("restaurant")
 
 
-def _review_summary(db: Session) -> dict:
-    """One grouped query: average user rating + review count per restaurant."""
-    rows = (
-        db.query(
-            Review.restaurant_id,
-            func.avg(Review.rating),
-            func.count(Review.id),
-        )
-        .group_by(Review.restaurant_id)
-        .all()
+def _review_summary(db: Session, restaurant_ids: Optional[Sequence[int]] = None) -> dict:
+    """One grouped query: average user rating + review count per restaurant.
+
+    ``restaurant_ids`` narrows the aggregate to the restaurants actually being
+    rendered. The owner's own dashboard reads a single restaurant but was
+    grouping the entire review table to produce one row, so its cost grew with
+    every review on the platform.
+    """
+    query = db.query(
+        Review.restaurant_id,
+        func.avg(Review.rating),
+        func.count(Review.id),
     )
+    if restaurant_ids is not None:
+        restaurant_ids = [rid for rid in restaurant_ids if rid is not None]
+        if not restaurant_ids:
+            return {}
+        query = query.filter(Review.restaurant_id.in_(restaurant_ids))
+    rows = query.group_by(Review.restaurant_id).all()
     return {
         r_id: {"reviews_rating": round(avg or 0.0, 1), "review_count": count}
         for r_id, avg, count in rows
@@ -118,7 +126,9 @@ def list_restaurants(
         # Case-insensitive exact city match (ilike would treat %/_ as wildcards).
         query = query.filter(func.lower(Restaurant.city) == city.lower())
     restaurants = query.order_by(Restaurant.rating.desc()).all()
-    summary = _review_summary(db)
+    # Summarise only the restaurants in this response, so a filtered listing
+    # does not aggregate every review on the platform to fill a few rows.
+    summary = _review_summary(db, [r.id for r in restaurants])
 
     if lat is not None and lng is not None:
         # Nearest-first by straight-line distance; restaurants missing
@@ -153,7 +163,7 @@ def my_restaurant(
     db: Session = Depends(get_db),
 ):
     restaurant = _own_restaurant(user, db)
-    summary = _review_summary(db)
+    summary = _review_summary(db, [restaurant.id])
     return _restaurant_payload(restaurant, summary)
 
 
