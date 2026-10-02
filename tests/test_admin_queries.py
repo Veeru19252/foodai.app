@@ -23,7 +23,7 @@ from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from backend.db import SessionLocal
-from backend.models import Order, Restaurant, User
+from backend.models import VALID_ORDER_STATUSES, Order, Restaurant, User
 from backend.routers import admin
 
 
@@ -154,6 +154,30 @@ def test_all_orders_returns_the_related_names(populated_db):
         assert row["customer_name"] == f"Q{index}", row
         assert row["restaurant_name"] == f"Diner {index}", row
         assert row["total"] == round(10.0 + index, 2)
+
+
+def test_overview_does_not_issue_a_query_per_role_or_status(populated_db):
+    """Grouped counts: the overview must not scale with roles/statuses.
+
+    The dashboard polls this endpoint, so the old one-query-per-value shape
+    cost 14 round-trips per poll. Six is the floor: role counts, status counts,
+    active deliveries, revenue, restaurants, menu items.
+    """
+    db, _n, _mine = populated_db
+    queries = _count_queries(db, lambda: admin.overview(AdminUser(), db))
+    assert queries <= 6, (
+        f"admin.overview issued {queries} queries; expected 6 grouped counts"
+    )
+
+
+def test_overview_reports_every_role_and_status_even_at_zero(populated_db):
+    """Grouping must not drop a role or status that currently has no rows."""
+    db, _n, _mine = populated_db
+    body = admin.overview(AdminUser(), db)
+    assert set(body["users"]) == {"customer", "restaurant", "delivery", "admin"}
+    assert set(body["orders_by_status"]) == set(VALID_ORDER_STATUSES)
+    assert all(isinstance(v, int) for v in body["users"].values())
+    assert all(isinstance(v, int) for v in body["orders_by_status"].values())
 
 
 def test_overview_revenue_is_summed_in_the_database(client, monkeypatch):

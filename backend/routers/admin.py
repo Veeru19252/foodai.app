@@ -21,13 +21,20 @@ admin_only = security.require_roles("admin")
 
 @router.get("/overview")
 def overview(user: User = Depends(admin_only), db: Session = Depends(get_db)):
-    role_counts = {
-        role: db.query(User).filter(User.role == role).count() for role in ("customer", "restaurant", "delivery", "admin")
-    }
-    order_status = {
-        status: db.query(Order).filter(Order.status == status).count()
-        for status in VALID_ORDER_STATUSES
-    }
+    # Grouped counts: one query per table instead of one per role/status. The
+    # admin dashboard polls this endpoint, so the old shape cost 14 round-trips
+    # per poll (4 role counts + 6 status counts + 4 singles). Unknown roles and
+    # statuses are ignored, matching the per-value counts this replaced.
+    role_counts = {role: 0 for role in ("customer", "restaurant", "delivery", "admin")}
+    for role, count in db.query(User.role, func.count(User.id)).group_by(User.role):
+        if role in role_counts:
+            role_counts[role] = count
+
+    order_status = {status: 0 for status in VALID_ORDER_STATUSES}
+    for status, count in db.query(Order.status, func.count(Order.id)).group_by(Order.status):
+        if status in order_status:
+            order_status[status] = count
+
     active_deliveries = (
         db.query(Delivery)
         .filter(Delivery.pickup_time.isnot(None), Delivery.delivered_time.is_(None))
