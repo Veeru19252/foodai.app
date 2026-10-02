@@ -6,12 +6,13 @@ Customers rate a restaurant after a DELIVERED order. One review per order.
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from backend import security
 from backend.db import get_db
+from backend.pagination import DEFAULT_LIMIT, count_of, set_total, validate_page
 from backend.models import Order, Review, User
 from backend.schemas import ReviewCreate, ReviewOut, ReviewReplyIn
 
@@ -73,17 +74,26 @@ def reply_to_review(
 
 
 @router.get("/restaurant/{restaurant_id}", response_model=list)
-def list_reviews(restaurant_id: int, db: Session = Depends(get_db)):
+def list_reviews(
+    restaurant_id: int,
+    db: Session = Depends(get_db),
+    response: Response = None,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+):
     # _review_out reads review.user.name, which is lazy: one SELECT per review
     # (measured 101 queries for 100 reviews). Reviews are unbounded and public,
-    # so the busiest restaurant is the worst case.
-    reviews = (
+    # so the busiest restaurant is the worst case -- and this endpoint needs no
+    # authentication at all.
+    limit, offset = validate_page(limit, offset)
+    query = (
         db.query(Review)
         .options(joinedload(Review.user))
         .filter(Review.restaurant_id == restaurant_id)
         .order_by(Review.id.desc())
-        .all()
     )
+    set_total(response, count_of(db, query))
+    reviews = query.limit(limit).offset(offset).all()
     return [_review_out(r) for r in reviews]
 
 
@@ -91,18 +101,24 @@ def list_reviews(restaurant_id: int, db: Session = Depends(get_db)):
 def my_restaurant_reviews(
     user: User = Depends(restaurant_only),
     db: Session = Depends(get_db),
+    response: Response = None,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
 ):
     """Reviews left on any restaurant owned by the logged-in owner."""
     restaurant_ids = [r.id for r in user.restaurants]
     if not restaurant_ids:
+        set_total(response, 0)
         return []
-    reviews = (
+    limit, offset = validate_page(limit, offset)
+    query = (
         db.query(Review)
         .options(joinedload(Review.user))
         .filter(Review.restaurant_id.in_(restaurant_ids))
         .order_by(Review.id.desc())
-        .all()
     )
+    set_total(response, count_of(db, query))
+    reviews = query.limit(limit).offset(offset).all()
     return [_review_out(r) for r in reviews]
 
 

@@ -14,12 +14,13 @@ from datetime import date, datetime, timedelta
 from typing import Optional, Sequence
 
 import tracking
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend import security
 from backend.db import get_db
+from backend.pagination import DEFAULT_LIMIT, count_of, set_total, validate_page
 from backend.models import MenuItem, Order, OrderItem, PromoCode, Restaurant, Review, User
 from backend.schemas import MenuItemCreate, MenuItemOut, MenuItemUpdate, OfferCreate
 
@@ -114,7 +115,14 @@ def list_restaurants(
     lat: Optional[float] = Query(None, ge=-90.0, le=90.0),
     lng: Optional[float] = Query(None, ge=-180.0, le=180.0),
     db: Session = Depends(get_db),
+    response: Response = None,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
 ):
+    # The public restaurant listing is unauthenticated and had no cap, so the
+    # response and the review-summary query below both scaled with the whole
+    # catalogue. Paging first also keeps the summary to the rows actually sent.
+    limit, offset = validate_page(limit, offset)
     query = db.query(Restaurant)
     if cuisine and cuisine != "All":
         query = query.filter(Restaurant.cuisine == cuisine)
@@ -125,7 +133,16 @@ def list_restaurants(
     if city:
         # Case-insensitive exact city match (ilike would treat %/_ as wildcards).
         query = query.filter(func.lower(Restaurant.city) == city.lower())
-    restaurants = query.order_by(Restaurant.rating.desc()).all()
+    set_total(response, count_of(db, query))
+    # id is the tiebreaker: rating alone leaves ties in an order the database is
+    # free to change, so two pages could both return the same row and skip
+    # another entirely.
+    restaurants = (
+        query.order_by(Restaurant.rating.desc(), Restaurant.id.desc())
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
     # Summarise only the restaurants in this response, so a filtered listing
     # does not aggregate every review on the platform to fill a few rows.
     summary = _review_summary(db, [r.id for r in restaurants])

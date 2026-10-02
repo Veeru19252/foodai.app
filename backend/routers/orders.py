@@ -11,12 +11,13 @@ from datetime import date, datetime, timezone
 from typing import Optional, Sequence
 
 import tracking
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from backend import idempotency, order_state, security, simulation
 from backend.db import get_db
+from backend.pagination import DEFAULT_LIMIT, count_of, set_total, validate_page
 from backend.models import (
     Delivery,
     MenuItem,
@@ -240,23 +241,38 @@ def current_surge(
 
 
 @router.get("")
-def my_orders(user: User = Depends(customer_only), db: Session = Depends(get_db)):
+def my_orders(
+    user: User = Depends(customer_only),
+    db: Session = Depends(get_db),
+    response: Response = None,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+):
+    limit, offset = validate_page(limit, offset)
     # _order_brief reads order.restaurant.name for every row, so leaving it
     # lazy issued one extra SELECT per order (101 queries for 100 orders).
     # This is the customer's own order history, so it grows with their
-    # lifetime activity rather than the table.
-    orders = (
+    # lifetime activity rather than the table -- hence the page bounds.
+    query = (
         db.query(Order)
         .options(joinedload(Order.restaurant))
         .filter(Order.customer_id == user.id)
         .order_by(Order.id.desc())
-        .all()
     )
+    set_total(response, count_of(db, query))
+    orders = query.limit(limit).offset(offset).all()
     return [_order_brief(o) for o in orders]
 
 
 @router.get("/restaurant")
-def restaurant_orders(user: User = Depends(restaurant_or_admin), db: Session = Depends(get_db)):
+def restaurant_orders(
+    user: User = Depends(restaurant_or_admin),
+    db: Session = Depends(get_db),
+    response: Response = None,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+):
+    limit, offset = validate_page(limit, offset)
     # The response reads customer and assigned_driver per row, so both are
     # eager-loaded: as lazy attributes this was one SELECT per order (101
     # queries for 100 orders). joinedload keeps it a single query even when
@@ -270,7 +286,8 @@ def restaurant_orders(user: User = Depends(restaurant_or_admin), db: Session = D
     )
     if user.role == "restaurant":
         query = query.filter(Restaurant.user_id == user.id)
-    orders = query.all()
+    set_total(response, count_of(db, query))
+    orders = query.limit(limit).offset(offset).all()
     return [
         {
             "id": o.id,
@@ -286,21 +303,29 @@ def restaurant_orders(user: User = Depends(restaurant_or_admin), db: Session = D
 
 
 @router.get("/driver")
-def driver_orders(user: User = Depends(security.require_roles("delivery")), db: Session = Depends(get_db)):
+def driver_orders(
+    user: User = Depends(security.require_roles("delivery")),
+    db: Session = Depends(get_db),
+    response: Response = None,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+):
+    limit, offset = validate_page(limit, offset)
     # The order, its status and both names are selected alongside the delivery
     # in one query. This ran db.query(Order) per delivery with the restaurant
     # and customer read lazily, so a driver's whole delivery list cost several
     # queries per row. Delivery has no `order` relationship, so the join is
     # explicit.
-    rows = (
+    query = (
         db.query(Delivery, Order, Restaurant.name, User.name)
         .outerjoin(Order, Order.id == Delivery.order_id)
         .outerjoin(Restaurant, Restaurant.id == Order.restaurant_id)
         .outerjoin(User, User.id == Order.customer_id)
         .filter(Delivery.driver_id == user.id)
         .order_by(Delivery.id.desc())
-        .all()
     )
+    set_total(response, count_of(db, query))
+    rows = query.limit(limit).offset(offset).all()
     result = []
     for d, order, restaurant_name, customer_name in rows:
         if order is None:

@@ -323,6 +323,9 @@ def test_my_orders_does_not_issue_a_query_per_order(history_orders):
     queries = _count_queries(
         db, lambda: orders_router.my_orders(CustomerUser(customer_id), db)
     )
+    # 2 = the page query plus the X-Total-Count COUNT. The bound is what
+    # catches a regression to one query per order (it was n + 1 before the
+    # eager-load fix), so it must stay constant as n grows.
     assert queries <= 2, (
         f"my_orders issued {queries} queries for {n} orders; "
         "order.restaurant must be eager-loaded"
@@ -342,6 +345,8 @@ def test_restaurant_orders_does_not_issue_a_query_per_order(distinct_customers):
     queries = _count_queries(
         db, lambda: orders_router.restaurant_orders(AdminUser(), db)
     )
+    # 2 = the page query plus the X-Total-Count COUNT; the point is that it
+    # does not grow with n.
     assert queries <= 2, (
         f"restaurant_orders issued {queries} queries for {n} orders; "
         "customer and assigned_driver must be eager-loaded"

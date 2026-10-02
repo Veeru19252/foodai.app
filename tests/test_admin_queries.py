@@ -133,6 +133,7 @@ def test_all_orders_does_not_issue_a_query_per_order(populated_db):
     """The dashboard must not scale its query count with the table."""
     db, n, _mine = populated_db
     queries = _count_queries(db, lambda: admin.all_orders(AdminUser(), db))
+    # 2 = the page query plus the X-Total-Count COUNT; it must not grow with n.
     assert queries <= 2, (
         f"admin.all_orders issued {queries} queries for {n} orders; "
         "customer/restaurant must be eager-loaded"

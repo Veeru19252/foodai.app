@@ -5,13 +5,14 @@ Admin-only management: platform overview, restaurant/menu management, and
 user listing. Admin is the sole allowed role here.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 import tracking
 
 from backend import security
+from backend.pagination import DEFAULT_LIMIT, count_of, set_total, validate_page
 from backend.tracking_state import resolve_restaurant_coordinates
 from backend.db import get_db
 from backend.models import Delivery, MenuItem, Order, Restaurant, User, VALID_ORDER_STATUSES
@@ -59,8 +60,19 @@ def overview(user: User = Depends(admin_only), db: Session = Depends(get_db)):
 
 
 @router.get("/users")
-def list_users(user: User = Depends(admin_only), db: Session = Depends(get_db)):
-    users = db.query(User).order_by(User.id).all()
+def list_users(
+    user: User = Depends(admin_only),
+    db: Session = Depends(get_db),
+    response: Response = None,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+):
+    # The whole user table used to be returned and serialized in one response;
+    # it grows with the platform, and this is the admin's first page load.
+    limit, offset = validate_page(limit, offset)
+    query = db.query(User).order_by(User.id)
+    set_total(response, count_of(db, query))
+    users = query.limit(limit).offset(offset).all()
     return [{"id": u.id, "name": u.name, "email": u.email, "role": u.role} for u in users]
 
 
@@ -85,17 +97,25 @@ def update_user_role(
 
 
 @router.get("/orders")
-def all_orders(user: User = Depends(admin_only), db: Session = Depends(get_db)):
+def all_orders(
+    user: User = Depends(admin_only),
+    db: Session = Depends(get_db),
+    response: Response = None,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+):
     # joinedload: customer and restaurant are read for every row below, and
     # leaving them lazy issued two extra SELECTs per order (401 queries for a
     # 200-order table). This endpoint is polled by the admin dashboard, so it
     # is the most visible place that scaling bites.
-    orders = (
+    limit, offset = validate_page(limit, offset)
+    query = (
         db.query(Order)
         .options(joinedload(Order.customer), joinedload(Order.restaurant))
         .order_by(Order.id.desc())
-        .all()
     )
+    set_total(response, count_of(db, query))
+    orders = query.limit(limit).offset(offset).all()
     return [
         {
             "id": o.id,

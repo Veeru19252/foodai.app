@@ -105,6 +105,28 @@ def test_list_restaurants(client):
     assert resp.status_code == 200
     names = [r["name"] for r in resp.json()]
     assert "Spice Garden" in names
+    # The catalogue is capped now, so a client needs the unpaged total to tell a
+    # short result from a truncated one. Also exposed to the browser, or the
+    # frontend fetch could not read it.
+    assert int(resp.headers["X-Total-Count"]) == len(resp.json())
+    assert "X-Total-Count" in resp.headers.get("access-control-expose-headers", "")
+
+
+def test_restaurant_listing_accepts_paging_and_rejects_a_bad_limit(client):
+    first = client.get("/restaurants?limit=2&offset=0")
+    second = client.get("/restaurants?limit=2&offset=2")
+    assert first.status_code == 200 and second.status_code == 200
+    assert len(first.json()) == 2
+    first_ids = [r["id"] for r in first.json()]
+    second_ids = [r["id"] for r in second.json()]
+    assert not set(first_ids) & set(second_ids)
+    # Both pages agree on the size of the whole catalogue, so paging is
+    # walkable rather than arbitrary slicing.
+    assert int(first.headers["X-Total-Count"]) == int(second.headers["X-Total-Count"])
+
+    assert client.get("/restaurants?limit=0").status_code == 422
+    assert client.get("/restaurants?offset=-1").status_code == 422
+    assert client.get("/restaurants?limit=100000").status_code == 422
 
 
 def test_cuisine_filter(client):
