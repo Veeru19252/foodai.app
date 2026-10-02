@@ -8,10 +8,11 @@ database.py (validate_promo_code / calculate_discount / increment usage).
 """
 
 from datetime import date, datetime, timezone
-from typing import Optional
+from typing import Optional, Sequence
 
 import tracking
 from fastapi import APIRouter, Depends, Header, HTTPException
+from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session, joinedload
 
 from backend import idempotency, order_state, security, simulation
@@ -1052,10 +1053,71 @@ def _rider_last_position(db: Session, driver_id: int, fallback) -> tuple:
 
 
 def _rider_load(db: Session, driver_id: int) -> dict:
-    deliveries = db.query(Delivery).filter(Delivery.driver_id == driver_id).all()
-    active = sum(1 for d in deliveries if d.pickup_time is not None and d.delivered_time is None)
-    queued = sum(1 for d in deliveries if d.pickup_time is None)
-    return {"active": active, "queued": queued, "load": active * 2 + queued}
+    return _rider_loads(db, [driver_id]).get(driver_id) or {
+        "active": 0,
+        "queued": 0,
+        "load": 0,
+    }
+
+
+def _rider_loads(db: Session, driver_ids: Sequence[int]) -> dict:
+    """Load state for many riders at once, keyed by driver id.
+
+    Every rider is absent from the result until they have a delivery, so the
+    caller falls back to a zero load. Counting in SQL rather than loading each
+    rider's delivery rows keeps auto-assign at two queries for the whole fleet
+    instead of two per rider.
+    """
+    driver_ids = [did for did in driver_ids if did is not None]
+    if not driver_ids:
+        return {}
+    rows = (
+        db.query(
+            Delivery.driver_id,
+            # "active" keeps its original meaning: picked up, not yet delivered.
+            func.sum(
+                case(
+                    (
+                        and_(
+                            Delivery.pickup_time.isnot(None),
+                            Delivery.delivered_time.is_(None),
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ),
+            func.sum(case((Delivery.pickup_time.is_(None), 1), else_=0)),
+        )
+        .filter(Delivery.driver_id.in_(driver_ids))
+        .group_by(Delivery.driver_id)
+        .all()
+    )
+    loads = {}
+    for driver_id, active, queued in rows:
+        active, queued = int(active or 0), int(queued or 0)
+        loads[driver_id] = {"active": active, "queued": queued, "load": active * 2 + queued}
+    return loads
+
+
+def _rider_last_positions(db: Session, driver_ids: Sequence[int], fallback) -> dict:
+    """Latest known position per rider, keyed by driver id.
+
+    One query for the whole fleet, using DISTINCT ON rather than a query per
+    rider. Riders with no trip log get the fallback.
+    """
+    driver_ids = [did for did in driver_ids if did is not None]
+    if not driver_ids:
+        return {}
+    rows = (
+        db.query(Delivery.driver_id, TripLog.lat, TripLog.lng)
+        .join(TripLog, TripLog.delivery_id == Delivery.id)
+        .filter(Delivery.driver_id.in_(driver_ids))
+        .distinct(Delivery.driver_id)
+        .order_by(Delivery.driver_id, TripLog.timestamp.desc(), TripLog.id.desc())
+        .all()
+    )
+    return {driver_id: (lat, lng) for driver_id, lat, lng in rows}
 
 
 @router.post("/{order_id}/auto-assign")
@@ -1094,10 +1156,19 @@ def auto_assign_delivery(
 
     restaurant_pos = restaurant_start(order)
 
+    # Batch the fleet-wide lookups. Querying per rider cost two statements for
+    # every driver, so auto-assign scaled with the size of the fleet rather
+    # than with the one order being dispatched.
+    driver_ids = [d.id for d in drivers]
+    loads = _rider_loads(db, driver_ids)
+    positions = _rider_last_positions(db, driver_ids, restaurant_pos)
+
     best = None
     for driver in drivers:
-        load = _rider_load(db, driver.id)
-        pos = _rider_last_position(db, driver.id, restaurant_pos)
+        load = loads.get(
+            driver.id, {"active": 0, "queued": 0, "load": 0}
+        )
+        pos = positions.get(driver.id, restaurant_pos)
         dist_km = tracking.haversine_km(pos, restaurant_pos)
         score = load["load"] + dist_km * 0.5
         candidate = {
