@@ -214,23 +214,30 @@ def get_recommendations(
     """
     from collections import Counter
 
-    orders = db.query(Order).filter(Order.customer_id == user.id).all()
-    restaurants = db.query(Restaurant).all()
-    if not restaurants:
+    # Only restaurant_id is read off the order history, and only five columns
+    # off each restaurant. Both were loaded as full ORM entities, so a customer
+    # with a long history paid to instantiate every order and every restaurant
+    # in the catalogue -- including columns no part of the scoring touches.
+    order_rows = (
+        db.query(Order.restaurant_id).filter(Order.customer_id == user.id).all()
+    )
+    restaurant_rows = db.query(
+        Restaurant.id, Restaurant.name, Restaurant.cuisine, Restaurant.address,
+        Restaurant.rating,
+    ).all()
+    if not restaurant_rows:
         return {"recommendations": [], "fallback": True}
 
-    ordered = Counter(o.restaurant_id for o in orders if o.restaurant_id)
+    ordered = Counter(rid for (rid,) in order_rows if rid)
     # Look cuisines up by id. The nested comprehension this replaces was
     # orders x restaurants, so a customer with a long history scanning a large
     # catalog spent hundreds of thousands of iterations in Python on every
     # recommendation request.
-    cuisine_by_id = {r.id: r.cuisine for r in restaurants}
+    cuisine_by_id = {rid: cuisine for rid, _n, cuisine, _a, _r in restaurant_rows}
     cuisine_orders = Counter(
-        cuisine_by_id[o.restaurant_id]
-        for o in orders
-        if o.restaurant_id in cuisine_by_id
+        cuisine_by_id[rid] for (rid,) in order_rows if rid in cuisine_by_id
     )
-    total_orders = max(1, len(orders))
+    total_orders = max(1, len(order_rows))
 
     review_rows = (
         db.query(
@@ -239,16 +246,21 @@ def get_recommendations(
         .group_by(Review.restaurant_id)
         .all()
     )
+    # avg() over an integer column comes back as a Decimal, and Decimal has no
+    # __truediv__ against float -- so this scored with a float raised a TypeError,
+    # turning the whole endpoint into a 500 on any platform with a single review.
+    # The seeded demo has none, which is why it went unnoticed. Cast in SQL so
+    # the value is a float regardless of the column type.
     review_map = {
-        rid: (round(avg or 0.0, 1), count) for rid, avg, count in review_rows
+        rid: (round(float(avg or 0.0), 1), count) for rid, avg, count in review_rows
     }
 
     scored = []
-    for r in restaurants:
-        order_count = ordered.get(r.id, 0)
-        cuisine_match = cuisine_orders.get(r.cuisine, 0) / total_orders
-        base = (r.rating or 0.0) / 5.0
-        reviews_rating, review_count = review_map.get(r.id, (0.0, 0))
+    for restaurant_id, name, cuisine, address, rating in restaurant_rows:
+        order_count = ordered.get(restaurant_id, 0)
+        cuisine_match = cuisine_orders.get(cuisine, 0) / total_orders
+        base = (rating or 0.0) / 5.0
+        reviews_rating, review_count = review_map.get(restaurant_id, (0.0, 0))
         popularity = (reviews_rating / 5.0) * 0.5 if review_count else 0.0
         familiarity = min(1.0, order_count / 2.0)
         score = (
@@ -258,7 +270,7 @@ def get_recommendations(
         if order_count > 0:
             reason = f"You've ordered here {order_count}×"
         elif cuisine_match > 0.2:
-            reason = f"You like {r.cuisine} food"
+            reason = f"You like {cuisine} food"
         elif review_count > 0:
             reason = f"{review_count} customer review{'s' if review_count != 1 else ''}"
         else:
@@ -266,11 +278,11 @@ def get_recommendations(
 
         scored.append(
             {
-                "restaurant_id": r.id,
-                "name": r.name,
-                "cuisine": r.cuisine,
-                "address": r.address,
-                "rating": round(r.rating or 0.0, 2),
+                "restaurant_id": restaurant_id,
+                "name": name,
+                "cuisine": cuisine,
+                "address": address,
+                "rating": round(rating or 0.0, 2),
                 "reviews_rating": reviews_rating,
                 "review_count": review_count,
                 "score": round(score, 3),
@@ -278,8 +290,11 @@ def get_recommendations(
             }
         )
 
-    scored.sort(key=lambda item: item["score"], reverse=True)
-    return {"recommendations": scored[:4], "fallback": len(orders) == 0}
+    # id breaks ties. Every term in the score is zero for a restaurant nobody has
+    # ordered, rated, or reviewed, so unscored rows tie at 0.0 and the order
+    # among them was whatever the database happened to return.
+    scored.sort(key=lambda item: (item["score"], item["restaurant_id"]), reverse=True)
+    return {"recommendations": scored[:4], "fallback": len(order_rows) == 0}
 
 
 @router.get("/recommendations/items")
