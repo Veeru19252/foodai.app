@@ -13,7 +13,7 @@ from typing import Optional, Sequence
 import tracking
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import and_, case, func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from backend import idempotency, order_state, security, simulation
 from backend.db import get_db
@@ -601,7 +601,10 @@ def create_order(
             f"Order #{order.id} from {user.name} — ₹{order.total:.0f}",
             order.id,
         )
-    return _order_detail(order)
+    # Re-read rather than serializing the just-inserted instance: after commit
+    # its attributes are expired and its relationships are still lazy, which is
+    # the per-line-item query this avoids.
+    return _order_detail(_reload_for_detail(db, order.id))
 
 
 @router.post("/batch", response_model=BatchOrderResponse, status_code=201)
@@ -660,7 +663,13 @@ def create_orders_batch(
                 f"Order #{order.id} from {user.name} — ₹{order.total:.0f}",
                 order.id,
             )
-    return BatchOrderResponse(orders=[_order_detail(o) for o in orders])
+    # Re-read the whole cart in one query with the serializer relationships
+    # loaded, rather than serializing each just-inserted instance, whose
+    # relationships are still lazy: that issued a SELECT per line item per
+    # group on top of the order itself.
+    return BatchOrderResponse(
+        orders=[_order_detail(o) for o in _reload_all_for_detail(db, [o.id for o in orders])]
+    )
 
 
 @router.post("/{order_id}/reorder", response_model=OrderOut, status_code=201)
@@ -728,13 +737,69 @@ def reorder_order(
             price=menu[oi.menu_item_id].price,
         ))
     db.commit()
-    db.refresh(order)
-    return _order_detail(order)
+    return _order_detail(_reload_for_detail(db, order.id))
+
+
+def _detail_options():
+    """Eager-load exactly what the single-order serializers read.
+
+    _order_detail and order_receipt read order.restaurant, order.customer,
+    order.items and each item's menu_item. All four are lazy, so serializing an
+    order cost one SELECT per line item on top of the order itself, and
+    CreateOrderRequest.items has no max_length, so the client sets that count.
+    """
+    return (
+        selectinload(Order.restaurant),
+        selectinload(Order.customer),
+        selectinload(Order.items).selectinload(OrderItem.menu_item),
+    )
+
+
+def _reload_for_detail(db: Session, order_id: int) -> Order:
+    """Re-read one order with its serializer relationships loaded.
+
+    Used after a write, where the in-memory instance either has expired
+    attributes (post-commit) or never had its relationships loaded at all.
+    """
+    return (
+        db.query(Order)
+        .options(*_detail_options())
+        .filter(Order.id == order_id)
+        .one()
+    )
+
+
+def _reload_all_for_detail(db: Session, order_ids: Sequence[int]) -> list:
+    """Re-read several orders with their serializer relationships loaded.
+
+    Same eager loading as _reload_for_detail, in one statement, so a batch
+    response does not pay for the relationships once per order.
+    """
+    if not order_ids:
+        return []
+    found = {
+        order.id: order
+        for order in db.query(Order)
+        .options(*_detail_options())
+        .filter(Order.id.in_(list(order_ids)))
+        .all()
+    }
+    # Preserves the caller's ordering.
+    return [found[oid] for oid in order_ids if oid in found]
 
 
 def _ensure_order_accessible(db: Session, user: User, order_id: int) -> Order:
-    """Return the order or 404/403 unless the user may view it."""
-    order = db.query(Order).filter(Order.id == order_id).first()
+    """Return the order or 404/403 unless the user may view it.
+
+    The order comes back ready to serialize, so callers that only read it do
+    not each re-issue the relationship queries.
+    """
+    order = (
+        db.query(Order)
+        .options(*_detail_options())
+        .filter(Order.id == order_id)
+        .first()
+    )
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found.")
     if user.role == "delivery":
@@ -916,7 +981,7 @@ def update_order_status(
             }[payload.status],
             order.id,
         )
-    return _order_detail(order)
+    return _order_detail(_reload_for_detail(db, order.id))
 
 
 @router.post("/{order_id}/cancel")
@@ -937,7 +1002,7 @@ def cancel_order(
         raise HTTPException(status_code=400, detail=f"Order cannot be cancelled once {order.status}.")
     order.status = "CANCELLED"
     db.commit()
-    return _order_detail(order)
+    return _order_detail(_reload_for_detail(db, order.id))
 
 
 @router.post("/{order_id}/assign")
