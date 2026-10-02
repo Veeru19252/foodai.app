@@ -9,7 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
+import tracking
+
 from backend import security
+from backend.tracking_state import resolve_restaurant_coordinates
 from backend.db import get_db
 from backend.models import Delivery, MenuItem, Order, Restaurant, User, VALID_ORDER_STATUSES
 from backend.schemas import MenuItemCreate, RestaurantCreate, UserRoleUpdate
@@ -113,17 +116,39 @@ def create_restaurant(
     user: User = Depends(admin_only),
     db: Session = Depends(get_db),
 ):
-    owner = None
-    if payload.user_id is not None:
-        owner = db.query(User).filter(User.id == payload.user_id, User.role == "restaurant").first()
-        if owner is None:
-            raise HTTPException(status_code=400, detail="Owner must be an existing restaurant-role user.")
+    # restaurants.user_id is NOT NULL, so an omitted owner used to reach the
+    # INSERT and surface as an IntegrityError -- a 500 for what is a bad
+    # request. Requiring it up front keeps that a 400.
+    if payload.user_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id is required: pick an existing restaurant-role user to own this restaurant.",
+        )
+    owner = db.query(User).filter(User.id == payload.user_id, User.role == "restaurant").first()
+    if owner is None:
+        raise HTTPException(status_code=400, detail="Owner must be an existing restaurant-role user.")
+    city, point = resolve_restaurant_coordinates(payload.city, payload.lat, payload.lng)
+    if point is None:
+        # Without a position every delivery from this restaurant routes from the
+        # demo home, which misroutes it and inflates the driver's payout. Refuse
+        # the create instead of storing a restaurant we cannot place.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Provide lat/lng, or a city this app knows: "
+                + ", ".join(sorted(tracking.CITY_CENTERS))
+                + "."
+            ),
+        )
     restaurant = Restaurant(
         name=payload.name,
         address=payload.address,
         cuisine=payload.cuisine,
         rating=payload.rating,
-        user_id=owner.id if owner else None,
+        user_id=owner.id,
+        city=city,
+        lat=point[0],
+        lng=point[1],
     )
     db.add(restaurant)
     db.commit()

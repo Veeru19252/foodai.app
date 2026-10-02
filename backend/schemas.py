@@ -5,7 +5,7 @@ FoodAI backend - Pydantic schemas (request/response contracts)
 from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---- auth ----
@@ -94,6 +94,21 @@ class RestaurantCreate(BaseModel):
     cuisine: str = Field(min_length=1, max_length=128)
     rating: float = Field(ge=0, le=5, default=0.0)
     user_id: Optional[int] = None
+    # Coordinates drive routing, ETA and driver payouts. Without them a
+    # restaurant falls back to the demo home, which silently misroutes every
+    # delivery from it. Either name a city this app knows or give an explicit
+    # point; see resolve_restaurant_coordinates for the exact rules.
+    city: Optional[str] = Field(default=None, max_length=64)
+    lat: Optional[float] = Field(default=None, ge=-90, le=90)
+    lng: Optional[float] = Field(default=None, ge=-180, le=180)
+
+    @model_validator(mode="after")
+    def _coordinates_are_resolvable(self):
+        # Half a point is not a location. Rejecting here means a restaurant is
+        # never created in a state where routing cannot place it.
+        if (self.lat is None) != (self.lng is None):
+            raise ValueError("lat and lng must be given together.")
+        return self
 
 
 class MenuItemCreate(BaseModel):

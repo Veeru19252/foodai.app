@@ -63,6 +63,22 @@ def client():
         yield test_client
 
 
+@pytest.fixture
+def db(client):
+    """A session against the test database, for router functions called directly.
+
+    Depends on ``client`` so the schema exists: a test that calls a route
+    handler as a plain function still needs the tables that
+    ``Base.metadata.create_all`` builds.
+    """
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
+
+
 def login(client: TestClient, email: str, password: str = "password123") -> dict:
     """Log in and return {access_token, refresh_token, user}."""
     resp = client.post("/auth/login", json={"email": email, "password": password})

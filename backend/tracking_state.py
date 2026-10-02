@@ -26,6 +26,35 @@ def delivery_end(order: Order) -> Tuple[float, float]:
     return tracking.DEFAULT_CUSTOMER_HOME
 
 
+def resolve_restaurant_coordinates(
+    city: Optional[str] = None,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+) -> Tuple[Optional[str], Optional[Tuple[float, float]]]:
+    """Resolve a restaurant's map position from what the caller supplied.
+
+    Returns ``(city, point)``; ``point`` is None when nothing could be resolved.
+
+    An explicit lat/lng pair wins, because it is the only thing precise enough
+    to route with. Otherwise a recognised city name resolves through
+    tracking.CITY_CENTERS, matched case-insensitively and ignoring surrounding
+    whitespace so "bangalore" and "New Delhi " both land.
+
+    ``tracking.CITY_CENTERS`` is the same table the seed data is drawn from, so
+    a restaurant created here lands on the same map as a seeded one. An unknown
+    city resolves to nothing rather than to Bengaluru, which keeps a typo from
+    quietly putting a kitchen in the wrong state -- the caller decides whether
+    that is a 400.
+    """
+    if lat is not None and lng is not None:
+        return city, (lat, lng)
+    if city:
+        for known_city, centre in tracking.CITY_CENTERS.items():
+            if known_city.strip().casefold() == city.strip().casefold():
+                return known_city, centre
+    return city, None
+
+
 def resolve_restaurant_point(
     restaurant_id: int, known: Optional[Tuple[float, float]] = None
 ) -> Tuple[float, float]:
