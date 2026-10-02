@@ -310,6 +310,29 @@ def test_batch_tracking_does_not_scale_queries_with_order_count(fleet):
     assert large <= 4, f"batch tracking issued {large} statements for 12 orders"
 
 
+def test_batch_tracking_does_not_scale_queries_for_a_driver(fleet):
+    """The driver branch is the one that used to fan out.
+
+    _can_access_order answers "is this driver assigned" with a SELECT, so looping
+    it over the batch is a query per order -- the exact thing the endpoint
+    removes. An admin short-circuits before that branch, so the only way to see
+    it is to measure as the driver.
+    """
+    db, ids = fleet["db"], fleet["mine_orders"]
+    driver = DriverUser(fleet["mine_id"])
+    small = _count_queries(
+        db, lambda: tracking_router.batch_tracking(_Request(ids[:2]), driver, db)
+    )
+    large = _count_queries(
+        db, lambda: tracking_router.batch_tracking(_Request(ids), driver, db)
+    )
+    assert small == large, (
+        f"2 orders cost {small} statements but 12 cost {large}; the assignment "
+        "check must come from the deliveries already loaded"
+    )
+    assert large <= 3, f"batch tracking issued {large} statements for 12 orders"
+
+
 def test_batch_tracking_returns_a_state_per_order(fleet):
     """Every order gets its own restaurant and customer, so this only passes if
     the eager join is really there. A lazy load on a shared row is free."""

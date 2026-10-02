@@ -71,7 +71,7 @@ def list_users(
     # it grows with the platform, and this is the admin's first page load.
     limit, offset = validate_page(limit, offset)
     query = db.query(User).order_by(User.id)
-    set_total(response, count_of(db, query))
+    set_total(response, count_of(query))
     users = query.limit(limit).offset(offset).all()
     return [{"id": u.id, "name": u.name, "email": u.email, "role": u.role} for u in users]
 
@@ -114,7 +114,7 @@ def all_orders(
         .options(joinedload(Order.customer), joinedload(Order.restaurant))
         .order_by(Order.id.desc())
     )
-    set_total(response, count_of(db, query))
+    set_total(response, count_of(query))
     orders = query.limit(limit).offset(offset).all()
     return [
         {

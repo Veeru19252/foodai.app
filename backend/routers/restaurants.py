@@ -133,7 +133,7 @@ def list_restaurants(
     if city:
         # Case-insensitive exact city match (ilike would treat %/_ as wildcards).
         query = query.filter(func.lower(Restaurant.city) == city.lower())
-    set_total(response, count_of(db, query))
+    set_total(response, count_of(query))
     # id is the tiebreaker: rating alone leaves ties in an order the database is
     # free to change, so two pages could both return the same row and skip
     # another entirely.

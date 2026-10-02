@@ -260,7 +260,7 @@ def my_orders(
         .filter(Order.customer_id == user.id)
         .order_by(Order.id.desc())
     )
-    set_total(response, count_of(db, query))
+    set_total(response, count_of(query))
     orders = query.limit(limit).offset(offset).all()
     return [_order_brief(o) for o in orders]
 
@@ -287,7 +287,7 @@ def restaurant_orders(
     )
     if user.role == "restaurant":
         query = query.filter(Restaurant.user_id == user.id)
-    set_total(response, count_of(db, query))
+    set_total(response, count_of(query))
     orders = query.limit(limit).offset(offset).all()
     return [
         {
@@ -325,7 +325,7 @@ def driver_orders(
         .filter(Delivery.driver_id == user.id)
         .order_by(Delivery.id.desc())
     )
-    set_total(response, count_of(db, query))
+    set_total(response, count_of(query))
     rows = query.limit(limit).offset(offset).all()
     result = []
     for d, order, restaurant_name, customer_name in rows:
@@ -1525,7 +1525,12 @@ def order_nudge(
     if not (is_restaurant_owner or is_admin or is_assigned_driver):
         raise HTTPException(status_code=403, detail="You cannot view this order.")
 
-    delivery = db.query(Delivery).filter(Delivery.order_id == order_id).first()
+    delivery = (
+        db.query(Delivery)
+        .filter(Delivery.order_id == order_id)
+        .order_by(Delivery.id.desc())
+        .first()
+    )
     return _nudge_payload(order, delivery)
 
 
@@ -1556,10 +1561,18 @@ def batch_order_nudges(
         .filter(Order.id.in_(ids))
         .all()
     )
-    deliveries = {
-        d.order_id: d
-        for d in db.query(Delivery).filter(Delivery.order_id.in_(ids)).all()
-    }
+    deliveries: dict = {}
+    for delivery in (
+        db.query(Delivery)
+        .filter(Delivery.order_id.in_(ids))
+        .order_by(Delivery.id.desc())
+        .all()
+    ):
+        # Newest wins, and the rows are newest-first. Assignment guards against a
+        # second delivery per order in application code but nothing in the schema
+        # enforces it, so without this the row chosen would be whatever the
+        # planner returned -- and could differ from the single-order endpoint.
+        deliveries.setdefault(delivery.order_id, delivery)
     authorized = _nudge_visible_orders(user, orders, db)
     return {
         "nudges": [

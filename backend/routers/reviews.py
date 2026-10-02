@@ -92,7 +92,7 @@ def list_reviews(
         .filter(Review.restaurant_id == restaurant_id)
         .order_by(Review.id.desc())
     )
-    set_total(response, count_of(db, query))
+    set_total(response, count_of(query))
     reviews = query.limit(limit).offset(offset).all()
     return [_review_out(r) for r in reviews]
 
@@ -106,18 +106,20 @@ def my_restaurant_reviews(
     offset: int = 0,
 ):
     """Reviews left on any restaurant owned by the logged-in owner."""
+    # Validated before the early return, so a bad limit is a 422 whether or not
+    # the owner happens to have restaurants yet.
+    limit, offset = validate_page(limit, offset)
     restaurant_ids = [r.id for r in user.restaurants]
     if not restaurant_ids:
         set_total(response, 0)
         return []
-    limit, offset = validate_page(limit, offset)
     query = (
         db.query(Review)
         .options(joinedload(Review.user))
         .filter(Review.restaurant_id.in_(restaurant_ids))
         .order_by(Review.id.desc())
     )
-    set_total(response, count_of(db, query))
+    set_total(response, count_of(query))
     reviews = query.limit(limit).offset(offset).all()
     return [_review_out(r) for r in reviews]
 

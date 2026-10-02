@@ -12,6 +12,7 @@ the order owner, the restaurant, the assigned driver, or an admin.
 
 import asyncio
 import json
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session, joinedload
@@ -44,6 +45,52 @@ def _can_access_order(user: User, order: Order, db: Session) -> bool:
     return False
 
 
+def _current_delivery(db: Session, order_id: int) -> Optional[Delivery]:
+    """The delivery that represents this order's current rider.
+
+    Assignment is guarded in application code so an order gets at most one
+    delivery, but nothing in the schema enforces that, so ``.first()`` here is
+    whatever the planner returns and can differ between two reads of the same
+    order. Taking the newest row is deterministic and matches intent.
+    """
+    return (
+        db.query(Delivery)
+        .filter(Delivery.order_id == order_id)
+        .order_by(Delivery.id.desc())
+        .first()
+    )
+
+
+def _visible_orders(
+    user: User, orders: list, deliveries: dict, db: Session
+) -> list:
+    """Filter ``orders`` to the ones ``user`` may read, without querying per order.
+
+    Must agree with _can_access_order exactly. The difference is where the
+    driver's assignments come from: _can_access_order issues a SELECT for every
+    order it is asked about, which in a loop is the per-order fan-out this batch
+    endpoint exists to remove -- and the symptom is invisible if the only
+    query-count test runs as an admin, since that role short-circuits first.
+
+    ``deliveries`` maps order_id to that order's current delivery.
+    """
+    if user.role == "admin":
+        return list(orders)
+    if user.role == "customer":
+        return [o for o in orders if o.customer_id == user.id]
+    if user.role == "restaurant":
+        owned = {r.id for r in user.restaurants}
+        return [o for o in orders if o.restaurant_id in owned]
+    if user.role == "delivery":
+        mine = {
+            order_id
+            for order_id, delivery in deliveries.items()
+            if delivery.driver_id == user.id
+        }
+        return [o for o in orders if o.id in mine]
+    return []
+
+
 def _load_order_or_404(order_id: int, db: Session) -> Order:
     order = db.query(Order).filter(Order.id == order_id).first()
     if order is None:
@@ -60,8 +107,7 @@ def get_tracking(
     order = _load_order_or_404(order_id, db)
     if not _can_access_order(user, order, db):
         raise HTTPException(status_code=403, detail="You cannot access this order.")
-    delivery = db.query(Delivery).filter(Delivery.order_id == order_id).first()
-    return build_tracking_state(order, delivery)
+    return build_tracking_state(order, _current_delivery(db, order_id))
 
 
 @router.post("/batch")
@@ -82,6 +128,11 @@ def batch_tracking(
     a fan-out of independent requests, and one of them failing should not blank
     the timelines for the rest. restaurant and customer are joined rather than
     lazy because build_tracking_state reads both on every order.
+
+    Authorization runs through _visible_orders rather than _can_access_order,
+    because the latter queries for each order and this endpoint's whole purpose
+    is not to. When an order somehow has more than one delivery row, only the
+    newest is kept, matching _current_delivery.
     """
     ids = set(payload.order_ids)
     orders = (
@@ -90,11 +141,16 @@ def batch_tracking(
         .filter(Order.id.in_(ids))
         .all()
     )
-    authorized = [o for o in orders if _can_access_order(user, o, db)]
-    deliveries = {
-        d.order_id: d
-        for d in db.query(Delivery).filter(Delivery.order_id.in_(ids)).all()
-    }
+    deliveries: dict = {}
+    for delivery in (
+        db.query(Delivery)
+        .filter(Delivery.order_id.in_(ids))
+        .order_by(Delivery.id.desc())
+        .all()
+    ):
+        # First one wins, and the rows are newest-first, so this is the newest.
+        deliveries.setdefault(delivery.order_id, delivery)
+    authorized = _visible_orders(user, orders, deliveries, db)
     return {
         "states": {
             order.id: build_tracking_state(order, deliveries.get(order.id))
@@ -124,8 +180,7 @@ async def ws_tracking(websocket: WebSocket, order_id: int):
             order = _load_order_or_404(order_id, db)
             if not _can_access_order(user, order, db):
                 return "forbidden"
-            delivery = db.query(Delivery).filter(Delivery.order_id == order_id).first()
-            return build_tracking_state(order, delivery)
+            return build_tracking_state(order, _current_delivery(db, order_id))
         finally:
             db.close()
 

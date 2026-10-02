@@ -53,7 +53,7 @@ def validate_page(limit: int = DEFAULT_LIMIT, offset: int = 0) -> tuple:
     return limit, offset
 
 
-def count_of(db, query) -> int:
+def count_of(query) -> int:
     """Rows ``query`` would return without a limit.
 
     Callers put this in ``X-Total-Count``. The ``order_by(None)`` matters: a
