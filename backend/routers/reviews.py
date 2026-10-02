@@ -7,6 +7,7 @@ Customers rate a restaurant after a DELIVERED order. One review per order.
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from backend import security
@@ -107,14 +108,22 @@ def my_restaurant_reviews(
 
 @router.get("/restaurant/{restaurant_id}/rating")
 def restaurant_rating(restaurant_id: int, db: Session = Depends(get_db)):
-    rows = db.query(Review).filter(Review.restaurant_id == restaurant_id).all()
-    if not rows:
+    # Averaged in SQL. This loads every review row to compute one mean, so its
+    # cost grew with the restaurant's review history. The mean is rounded in
+    # Python rather than by the database on purpose: Postgres rounds halves
+    # away from zero and Python rounds half to even, so an average landing
+    # exactly on a .x5 boundary would otherwise change value here.
+    avg, count = (
+        db.query(func.avg(Review.rating), func.count(Review.id))
+        .filter(Review.restaurant_id == restaurant_id)
+        .first()
+    )
+    if not count:
         return {"restaurant_id": restaurant_id, "rating": None, "review_count": 0}
-    avg = sum(r.rating for r in rows) / len(rows)
     return {
         "restaurant_id": restaurant_id,
-        "rating": round(avg, 1),
-        "review_count": len(rows),
+        "rating": round(float(avg), 1),
+        "review_count": int(count),
     }
 
 

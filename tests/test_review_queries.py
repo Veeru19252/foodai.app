@@ -144,6 +144,107 @@ def test_list_reviews_still_reports_the_reviewer_name(many_reviews):
         assert str(row["comment"]).startswith("n"), row
 
 
+def test_restaurant_rating_matches_the_python_mean(many_reviews):
+    """The aggregate must agree with the row-by-row mean it replaced.
+
+    Rating is an integer column, so Postgres computes avg as numeric and
+    rounds halves away from zero, while Python rounds half to even. An average
+    landing exactly on a .x5 boundary would differ, which is why the endpoint
+    rounds in Python. This pins the mean itself, not just the rounding.
+    """
+    db, n, restaurant_id, _owner_id = many_reviews
+    body = reviews_router.restaurant_rating(restaurant_id, db)
+    rows = db.query(Review).filter(
+        Review.restaurant_id == restaurant_id
+    ).all()
+    assert rows
+    expected_mean = sum(r.rating for r in rows) / len(rows)
+    assert body["review_count"] == len(rows)
+    assert body["rating"] == round(expected_mean, 1)
+
+
+def test_restaurant_rating_of_an_unreviewed_restaurant_is_none(many_reviews):
+    """An empty review set must stay None / 0, not 0.0 / 0."""
+    db, _n, restaurant_id, owner_id = many_reviews
+    empty = Restaurant(
+        user_id=owner_id, name="NRevEmpty", address="a", cuisine="test"
+    )
+    db.add(empty)
+    db.commit()
+    body = reviews_router.restaurant_rating(empty.id, db)
+    assert body == {"restaurant_id": empty.id, "rating": None, "review_count": 0}
+
+
+def test_restaurant_rating_rounds_halves_in_python(many_reviews):
+    """Pin the .x5 boundary case, where Postgres and Python disagree.
+
+    Ratings [5, 5, 5, 2] average exactly 4.25. Postgres round() on numeric
+    rounds halves away from zero and gives 4.3; Python rounds half to even and
+    gives 4.2. This endpoint rounded in Python before the SQL aggregate, so it
+    must keep returning 4.2 rather than silently changing the displayed rating.
+    """
+    db, _n, _restaurant_id, owner_id = many_reviews
+    boundary = Restaurant(
+        user_id=owner_id, name="NRevBoundary", address="a", cuisine="test"
+    )
+    db.add(boundary)
+    db.flush()
+    customer_id = (
+        db.query(User.id)
+        .filter(User.email.like("nreview_c%"))
+        .order_by(User.id)
+        .first()[0]
+    )
+    for rating in (5, 5, 5, 2):
+        o = Order(
+            customer_id=customer_id,
+            restaurant_id=boundary.id,
+            status="DELIVERED",
+            total=1.0,
+        )
+        db.add(o)
+        db.flush()
+        db.add(
+            Review(
+                restaurant_id=boundary.id,
+                user_id=customer_id,
+                order_id=o.id,
+                rating=rating,
+                comment="b",
+            )
+        )
+    db.commit()
+
+    body = reviews_router.restaurant_rating(boundary.id, db)
+    assert body["review_count"] == 4
+    assert sum([5, 5, 5, 2]) / 4 == 4.25
+    assert body["rating"] == 4.2, (
+        f"got {body['rating']}; 4.3 would mean the database's rounding "
+        "replaced Python's half-to-even"
+    )
+
+
+def test_restaurant_rating_does_not_load_every_review(many_reviews):
+    """One query for the mean, not one per review row."""
+    db, n, restaurant_id, _owner_id = many_reviews
+    counter = {"n": 0}
+
+    def _on_execute(*_args, **_kwargs):
+        counter["n"] += 1
+
+    db.expunge_all()
+    connection = db.connection()
+    event.listen(connection, "before_cursor_execute", _on_execute)
+    try:
+        reviews_router.restaurant_rating(restaurant_id, db)
+    finally:
+        event.remove(connection, "before_cursor_execute", _on_execute)
+    assert counter["n"] == 1, (
+        f"restaurant_rating issued {counter['n']} queries for {n} reviews; "
+        "the mean should be computed in SQL"
+    )
+
+
 def test_owner_review_dashboard_does_not_issue_a_query_per_review(many_reviews):
     db, n, restaurant_id, owner_id = many_reviews
     counter = {"n": 0}
