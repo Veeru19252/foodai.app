@@ -663,12 +663,11 @@ def create_orders_batch(
             Restaurant.id.in_(restaurant_ids)
         )
     ) if restaurant_ids else {}
-    if key is not None:
-        db.commit()
-        for order in orders:
-            db.refresh(order)
-    else:
-        db.commit()
+    # One commit either way. The Idempotency-Key branch used to follow this with
+    # a db.refresh per order, but nothing reads those instances afterwards: the
+    # ids were captured before the commit and the response is re-read below, so
+    # that loop was one wasted SELECT per restaurant group.
+    db.commit()
     for order_id, total, restaurant_id in notify_targets:
         owner_id = owner_by_restaurant.get(restaurant_id)
         if owner_id:

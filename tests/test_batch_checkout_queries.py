@@ -23,7 +23,15 @@ from sqlalchemy.orm import Session
 
 from backend import security
 from backend.db import SessionLocal, engine
-from backend.models import MenuItem, Notification, Order, OrderItem, Restaurant, User
+from backend.models import (
+    IdempotencyRecord,
+    MenuItem,
+    Notification,
+    Order,
+    OrderItem,
+    Restaurant,
+    User,
+)
 from backend.routers import orders as orders_router
 from backend.schemas import BatchOrderRequest, CreateOrderRequest
 
@@ -73,9 +81,15 @@ def _build(db: Session, tag: str, groups: int):
 
 def _purge(db: Session) -> None:
     """Remove everything the tests in this file insert."""
+    customer_ids = db.query(User.id).filter(User.email.like("nbatch_%"))
     owner_ids = db.query(User.id).filter(User.email.like("nbatch_%"))
     restaurant_ids = db.query(Restaurant.id).filter(Restaurant.name.like("NBatch%"))
     order_ids = db.query(Order.id).filter(Order.restaurant_id.in_(restaurant_ids))
+    # The keyed-cart tests leave idempotency rows behind, and they hold a FK to
+    # the customer, so they have to go before the users do.
+    db.query(IdempotencyRecord).filter(
+        IdempotencyRecord.user_id.in_(customer_ids)
+    ).delete(synchronize_session=False)
     db.query(Notification).filter(Notification.order_id.in_(order_ids)).delete(
         synchronize_session=False
     )
@@ -128,7 +142,7 @@ def _payload(spec):
     )
 
 
-def _run_batch(customer_id: int, spec):
+def _run_batch(customer_id: int, spec, idempotency_key=None):
     """Run one batch checkout on a dedicated connection; return (sql, response).
 
     The dedicated connection is what makes the statement list attributable:
@@ -147,7 +161,9 @@ def _run_batch(customer_id: int, spec):
         payload = _payload(spec)
         event.listen(connection, "before_cursor_execute", _on_execute)
         try:
-            response = orders_router.create_orders_batch(payload, customer, session, None)
+            response = orders_router.create_orders_batch(
+                payload, customer, session, idempotency_key
+            )
         finally:
             event.remove(connection, "before_cursor_execute", _on_execute)
     finally:
@@ -216,4 +232,44 @@ def test_batch_checkout_does_not_reread_orders_after_notifying(cart_db):
     assert not per_row_refreshes, (
         f"batch checkout issued {len(per_row_refreshes)} single-order refreshes: "
         + " | ".join(s[:140] for s in per_row_refreshes[:3])
+    )
+
+
+def test_idempotent_batch_checkout_does_not_refresh_each_order(cart_db):
+    """The Idempotency-Key path must not re-select every order it just made.
+
+    That branch committed and then refreshed each order in a loop. Nothing read
+    those instances afterwards, so it cost one SELECT per restaurant group and
+    BatchOrderRequest.orders has no max_length to bound it.
+    """
+    customer_id, spec = _build(cart_db, "k", 4)
+    sql, response = _run_batch(customer_id, spec, idempotency_key="cart-key-1")
+
+    assert len(response.orders) == 4
+    per_row_refreshes = [s for s in sql if "FROM orders" in s and "orders.id =" in s]
+    assert not per_row_refreshes, (
+        f"idempotent batch checkout issued {len(per_row_refreshes)} "
+        "single-order refreshes: " + " | ".join(s[:140] for s in per_row_refreshes[:3])
+    )
+
+
+def test_idempotent_batch_checkout_still_creates_and_replays(cart_db):
+    """Dropping the refresh must not change the key's behaviour.
+
+    The first call places every group and records the key; the retry returns the
+    same orders from live rows instead of creating a second cart.
+    """
+    customer_id, spec = _build(cart_db, "r", 4)
+    first_sql, first = _run_batch(customer_id, spec, idempotency_key="cart-key-2")
+    created = sorted(o.id for o in first.orders)
+    assert len(created) == 4
+
+    second_sql, second = _run_batch(customer_id, spec, idempotency_key="cart-key-2")
+    assert sorted(o.id for o in second.orders) == created, (
+        "retrying with the same Idempotency-Key must return the original orders"
+    )
+    creates = [s for s in second_sql if s.startswith("INSERT INTO orders")]
+    assert not creates, (
+        f"replay created {len(creates)} more orders instead of returning the "
+        "already-recorded cart"
     )
