@@ -217,6 +217,17 @@ export interface TrackingState {
   delivered_time?: string | null;
 }
 
+export interface OrderNudge {
+  order_id: number;
+  status: string;
+  delay_min: number;
+  risk: "LOW" | "MEDIUM" | "HIGH";
+  message: string;
+  eta_min: number;
+  progress: number;
+  elapsed_min?: number;
+}
+
 export interface DriverBrief {
   id: number;
   name: string;

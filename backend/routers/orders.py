@@ -36,6 +36,7 @@ from backend.schemas import (
     BatchOrderResponse,
     CreateOrderRequest,
     DriverLocationUpdate,
+    OrderIdListRequest,
     OrderItemOut,
     OrderOut,
     PromoApplyRequest,
@@ -1401,34 +1402,52 @@ def auto_assign_delivery(
     }
 
 
-@router.get("/{order_id}/nudge")
-def order_nudge(
-    order_id: int,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Delay-prediction nudge for restaurant owners, the assigned rider, and
-    admins. Compares elapsed time against the ML/route ETA and flags at-risk
-    orders so they can be reprioritized."""
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if order is None:
-        raise HTTPException(status_code=404, detail="Order not found.")
-    is_restaurant_owner = (
-        user.role == "restaurant"
-        and any(r.id == order.restaurant_id for r in user.restaurants)
-    )
-    is_admin = user.role == "admin"
-    is_assigned_driver = (
-        user.role == "delivery"
-        and db.query(Delivery)
-        .filter(Delivery.order_id == order_id, Delivery.driver_id == user.id)
-        .first()
-        is not None
-    )
-    if not (is_restaurant_owner or is_admin or is_assigned_driver):
-        raise HTTPException(status_code=403, detail="You cannot view this order.")
+def _nudge_visible_orders(
+    user: User, orders: Sequence[Order], db: Session
+) -> list:
+    """Filter ``orders`` to the ones ``user`` may get a nudge for.
 
-    delivery = db.query(Delivery).filter(Delivery.order_id == order_id).first()
+    Must mirror order_nudge exactly: restaurant owner, admin, or assigned rider.
+    Deliberately no customer branch. The customer is excluded there even for
+    their own orders, and a batch endpoint that quietly widened this would hand
+    customers delay predictions the single endpoint refuses them.
+
+    Resolved in one pass: the caller's restaurant ids and driver assignments are
+    read once rather than queried per order. Restaurant ownership and driver
+    assignment are both 1-to-many on the user, so each is resolved as a set up
+    front -- and an empty set means "owns nothing" or "assigned to nothing",
+    never "has access to everything".
+    """
+    if user.role == "admin":
+        return list(orders)
+
+    if user.role == "restaurant":
+        allowed = {r.id for r in user.restaurants}
+        return [o for o in orders if o.restaurant_id in allowed]
+
+    if user.role == "delivery":
+        if not orders:
+            return []
+        assigned = {
+            row[0]
+            for row in db.query(Delivery.order_id)
+            .filter(
+                Delivery.driver_id == user.id,
+                Delivery.order_id.in_([o.id for o in orders]),
+            )
+            .all()
+        }
+        return [o for o in orders if o.id in assigned]
+
+    return []
+
+
+def _nudge_payload(order: Order, delivery: Optional[Delivery]) -> dict:
+    """Delay prediction for one order. Caller must have authorized access.
+
+    Split out from the route so the batch endpoint can score many orders against
+    deliveries it already loaded, instead of re-reading the delivery per order.
+    """
     route, _ = order_route(order)
     progress, _rider = rider_progress(order, delivery)
     eta_min, _source = eta_for_order(order, progress)
@@ -1476,4 +1495,75 @@ def order_nudge(
         "eta_min": eta_min,
         "progress": round(progress, 4),
         "elapsed_min": round(elapsed_min, 1),
+    }
+
+
+@router.get("/{order_id}/nudge")
+def order_nudge(
+    order_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delay-prediction nudge for restaurant owners, the assigned rider, and
+    admins. Compares elapsed time against the ML/route ETA and flags at-risk
+    orders so they can be reprioritized."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found.")
+    is_restaurant_owner = (
+        user.role == "restaurant"
+        and any(r.id == order.restaurant_id for r in user.restaurants)
+    )
+    is_admin = user.role == "admin"
+    is_assigned_driver = (
+        user.role == "delivery"
+        and db.query(Delivery)
+        .filter(Delivery.order_id == order_id, Delivery.driver_id == user.id)
+        .first()
+        is not None
+    )
+    if not (is_restaurant_owner or is_admin or is_assigned_driver):
+        raise HTTPException(status_code=403, detail="You cannot view this order.")
+
+    delivery = db.query(Delivery).filter(Delivery.order_id == order_id).first()
+    return _nudge_payload(order, delivery)
+
+
+@router.post("/nudges")
+def batch_order_nudges(
+    payload: OrderIdListRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delay-prediction nudges for many orders in one round trip.
+
+    The driver dashboard used to fetch /{id}/nudge once per in-flight delivery on
+    a five-second poll, so a rider with six live orders issued seven requests
+    every five seconds. This reads the orders and their deliveries in two
+    statements, so the poll cost stops scaling with the rider's workload.
+
+    Ids the caller may not see are omitted rather than 403'd: the batch replaces
+    N requests that each had their own status, and a dashboard asking about a
+    mixed set of orders should still get the ones it is entitled to.
+    """
+    ids = set(payload.order_ids)
+    # joinedload: _nudge_payload resolves the route, which reads
+    # order.restaurant. Left lazy that is one SELECT per order -- the very fan-out
+    # this endpoint exists to remove.
+    orders = (
+        db.query(Order)
+        .options(joinedload(Order.restaurant))
+        .filter(Order.id.in_(ids))
+        .all()
+    )
+    deliveries = {
+        d.order_id: d
+        for d in db.query(Delivery).filter(Delivery.order_id.in_(ids)).all()
+    }
+    authorized = _nudge_visible_orders(user, orders, db)
+    return {
+        "nudges": [
+            _nudge_payload(order, deliveries.get(order.id))
+            for order in authorized
+        ]
     }

@@ -14,11 +14,12 @@ import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from backend import security
 from backend.db import SessionLocal, get_db
 from backend.models import Delivery, Order, User
+from backend.schemas import OrderIdListRequest
 from backend.simulation import manager, notifications_manager
 from backend.tracking_state import build_tracking_state
 
@@ -61,6 +62,45 @@ def get_tracking(
         raise HTTPException(status_code=403, detail="You cannot access this order.")
     delivery = db.query(Delivery).filter(Delivery.order_id == order_id).first()
     return build_tracking_state(order, delivery)
+
+
+@router.post("/batch")
+def batch_tracking(
+    payload: OrderIdListRequest,
+    user: User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Tracking state for many orders in one round trip.
+
+    The customer order history fetched /tracking/{id} per row to draw its
+    timeline previews, so the browser cost one request per order on every
+    render. Here the orders, their restaurants, their customers and their
+    deliveries all come back in four statements regardless of how many orders
+    were asked for.
+
+    Orders the caller may not see are skipped rather than 403'd -- this replaces
+    a fan-out of independent requests, and one of them failing should not blank
+    the timelines for the rest. restaurant and customer are joined rather than
+    lazy because build_tracking_state reads both on every order.
+    """
+    ids = set(payload.order_ids)
+    orders = (
+        db.query(Order)
+        .options(joinedload(Order.restaurant), joinedload(Order.customer))
+        .filter(Order.id.in_(ids))
+        .all()
+    )
+    authorized = [o for o in orders if _can_access_order(user, o, db)]
+    deliveries = {
+        d.order_id: d
+        for d in db.query(Delivery).filter(Delivery.order_id.in_(ids)).all()
+    }
+    return {
+        "states": {
+            order.id: build_tracking_state(order, deliveries.get(order.id))
+            for order in authorized
+        }
+    }
 
 
 @ws_router.websocket("/ws/tracking/{order_id}")

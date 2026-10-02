@@ -19,6 +19,7 @@ import type {
   OrderBrief,
   OrderDetail,
   OrderPrediction,
+  OrderNudge,
   OtpRequestResponse,
   OtpVerifyResponse,
   PaymentIntent,
@@ -352,17 +353,25 @@ export const ordersApi = {
       `/orders/${orderId}/auto-assign`,
       { method: "POST" }
     ),
-  nudge: (orderId: number) =>
+nudge: (orderId: number) =>
     api<{
       order_id: number;
       status: string;
       delay_min: number;
-      risk: "LOW" | "MEDIUM" | "HIGH";
+      risk: string;
       message: string;
-      eta_min: number | null;
+      eta_min: number;
       progress: number;
       elapsed_min?: number;
     }>(`/orders/${orderId}/nudge`),
+  // One request for every in-flight delivery. The driver dashboard polled
+  // nudge() per delivery every five seconds, so six live orders meant seven
+  // requests on every tick.
+  nudges: (orderIds: number[]) =>
+    api<{ nudges: OrderNudge[] }>("/orders/nudges", {
+      method: "POST",
+      body: JSON.stringify({ order_ids: orderIds }),
+    }),
   driverEarnings: () =>
     api<{
       per_delivery_rate: number;
@@ -450,6 +459,14 @@ export const addressesApi = {
 
 export const trackingApi = {
   state: (orderId: number) => api<TrackingState>(`/tracking/${orderId}`),
+  // One request for the whole page. The order history used to fetch state per
+  // row to draw its timeline previews, so a page of orders cost a page of
+  // requests. Ids the caller cannot see are simply absent from the map.
+  batch: (orderIds: number[]) =>
+    api<{ states: Record<string, TrackingState> }>("/tracking/batch", {
+      method: "POST",
+      body: JSON.stringify({ order_ids: orderIds }),
+    }),
 };
 
 export const paymentsApi = {

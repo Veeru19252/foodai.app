@@ -603,6 +603,93 @@ def test_order_nudge(client):
     )
     assert resp.status_code == 403
 
+    # The batch endpoint the dashboards use must agree with the single one, and
+    # must refuse a customer exactly as the single endpoint does.
+    owner_headers = {"Authorization": f"Bearer {owner_token}"}
+    batch = client.post(
+        "/orders/nudges", json={"order_ids": [order_id]}, headers=owner_headers
+    )
+    assert batch.status_code == 200, batch.text
+    batched = {n["order_id"]: n for n in batch.json()["nudges"]}
+    assert batched[order_id] == body
+
+    customer_batch = client.post(
+        "/orders/nudges", json={"order_ids": [order_id]}, headers=customer_headers
+    )
+    assert customer_batch.status_code == 200, customer_batch.text
+    assert customer_batch.json()["nudges"] == []
+
+    # A batch body is bounded, so the fan-out cannot be reintroduced by asking
+    # for everything at once.
+    assert client.post(
+        "/orders/nudges",
+        json={"order_ids": list(range(1, 102))},
+        headers=owner_headers,
+    ).status_code == 422
+    assert client.post(
+        "/orders/nudges", json={"order_ids": []}, headers=owner_headers
+    ).status_code == 422
+
+
+def test_tracking_batch(client):
+    """One request returns the same states the per-order endpoint returns."""
+    customer_token = login(client, "customer@foodai.com")["access_token"]
+    customer_headers = {"Authorization": f"Bearer {customer_token}"}
+    resp = client.post(
+        "/orders",
+        json=_gate(client, restaurant_id=2, items=[{"menu_item_id": 6, "quantity": 1}]),
+        headers=customer_headers,
+    )
+    order_id = resp.json()["id"]
+    mine = client.get("/orders", headers=customer_headers).json()
+    ids = [o["id"] for o in mine][:20]
+
+    batch = client.post(
+        "/tracking/batch", json={"order_ids": ids}, headers=customer_headers
+    )
+    assert batch.status_code == 200, batch.text
+    states = batch.json()["states"]
+    assert str(order_id) in states
+    assert set(states) <= {str(i) for i in ids}
+
+    single = client.get(f"/tracking/{order_id}", headers=customer_headers)
+    assert single.status_code == 200, single.text
+    assert states[str(order_id)] == single.json()
+
+    # A customer with no orders sees none of these, and the per-order endpoint
+    # refuses the same thing. Registered fresh rather than reusing a seeded
+    # account: a restaurant owner would legitimately own some of these orders
+    # depending on what earlier tests created, which is not what this asserts.
+    client.post(
+        "/auth/register",
+        json={
+            "name": "Tracking Batch Intruder",
+            "email": "tracking-batch-intruder@example.com",
+            "password": "password123",
+            "role": "customer",
+        },
+    )
+    intruder_headers = {
+        "Authorization": f"Bearer "
+        f"{login(client, 'tracking-batch-intruder@example.com')['access_token']}"
+    }
+    intruder = client.post(
+        "/tracking/batch", json={"order_ids": ids}, headers=intruder_headers
+    )
+    assert intruder.status_code == 200, intruder.text
+    assert intruder.json()["states"] == {}
+    assert client.get(
+        f"/tracking/{order_id}", headers=intruder_headers
+    ).status_code == 403
+
+    # Bounded body, and an unauthenticated read is still a 401.
+    assert client.post(
+        "/tracking/batch",
+        json={"order_ids": list(range(1, 102))},
+        headers=customer_headers,
+    ).status_code == 422
+    assert client.post("/tracking/batch", json={"order_ids": ids}).status_code == 401
+
 
 def test_driver_earnings(client):
     token = login(client, "rider@foodai.com")["access_token"]

@@ -215,6 +215,17 @@ class AssignDeliveryRequest(BaseModel):
     driver_id: int
 
 
+class OrderIdListRequest(BaseModel):
+    """Order ids for a batch read.
+
+    Bounded on purpose. These are the endpoints a polling dashboard hits every
+    few seconds, so an unbounded list would let one request do the fan-out work
+    the batch endpoint exists to remove. 100 covers a full dashboard page.
+    """
+
+    order_ids: List[int] = Field(min_length=1, max_length=100)
+
+
 class PromoApplyRequest(BaseModel):
     code: str
     order_total: float

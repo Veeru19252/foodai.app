@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ordersApi, paymentsApi } from "@/lib/api";
+import type { OrderNudge } from "@/lib/types";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import StatusBadge from "@/components/StatusBadge";
 
@@ -36,10 +37,8 @@ interface Earnings {
   }[];
 }
 
-interface Nudge {
-  risk: "LOW" | "MEDIUM" | "HIGH";
-  message: string;
-}
+/** Only the fields the driver card renders, so a wider payload cannot slip in. */
+type Nudge = Pick<OrderNudge, "risk" | "message">;
 
 export default function DriverPage() {
   const [deliveries, setDeliveries] = useState<DriverOrder[]>([]);
@@ -61,17 +60,32 @@ export default function DriverPage() {
     return () => clearInterval(timer);
   }, [load]);
 
-  // Delay-prediction warnings for in-flight orders.
+  // Delay-prediction warnings for in-flight orders, fetched as one batch.
+  // This used to fire a request per in-flight delivery on every five-second
+  // poll, so a rider carrying six live orders issued seven requests a tick.
   useEffect(() => {
     const relevant = deliveries.filter((d) =>
       ["OUT_FOR_DELIVERY", "PREPARING", "CONFIRMED"].includes(d.order_status)
     );
-    relevant.forEach((d) => {
-      ordersApi
-        .nudge(d.order_id)
-        .then((n) => setNudges((prev) => ({ ...prev, [d.order_id]: n })))
-        .catch(() => undefined);
-    });
+    if (relevant.length === 0) {
+      setNudges({});
+      return;
+    }
+    let cancelled = false;
+    ordersApi
+      .nudges(relevant.map((d) => d.order_id))
+      .then((body) => {
+        if (cancelled) return;
+        // Replace rather than merge: a nudge for an order that is no longer
+        // in flight should disappear rather than linger on the card.
+        const next: Record<number, Nudge> = {};
+        for (const n of body.nudges) next[n.order_id] = n;
+        setNudges(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [deliveries]);
 
   async function startDelivery(orderId: number) {

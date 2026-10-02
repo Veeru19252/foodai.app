@@ -45,17 +45,24 @@ export default function OrdersPage() {
       .mine()
       .then((rows) => {
         setOrders(rows);
-        // Pull live tracking for a compact timeline preview (created → pickup → delivered).
-        rows
-          .filter((o) => o.status !== "CANCELLED")
-          .forEach((o) => {
-            trackingApi
-              .state(o.id)
-              .then((state) =>
-                setTimelines((prev) => ({ ...prev, [o.id]: state }))
-              )
-              .catch(() => undefined);
-          });
+        // Live tracking for the compact timeline preview (created → pickup →
+        // delivered), fetched as one batch. This used to issue a request per
+        // row, so the page cost one round trip per order on every render.
+        const tracked = rows.filter((o) => o.status !== "CANCELLED");
+        if (tracked.length === 0) {
+          setTimelines({});
+          return;
+        }
+        trackingApi
+          .batch(tracked.map((o) => o.id))
+          .then((body) => {
+            const next: Record<number, TrackingState> = {};
+            for (const [orderId, state] of Object.entries(body.states)) {
+              next[Number(orderId)] = state;
+            }
+            setTimelines(next);
+          })
+          .catch(() => undefined);
       })
       .catch((err) =>
         setError(err instanceof Error ? err.message : "Failed to load orders")

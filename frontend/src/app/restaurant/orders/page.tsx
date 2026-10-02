@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ordersApi } from "@/lib/api";
-import type { DriverBrief, RestaurantOrder } from "@/lib/types";
+import type { DriverBrief, OrderNudge, RestaurantOrder } from "@/lib/types";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import StatusBadge from "@/components/StatusBadge";
 
@@ -12,14 +12,8 @@ const NEXT_STATUS: Record<string, string> = {
   PREPARING: "OUT_FOR_DELIVERY",
 };
 
-type Nudge = {
-  order_id: number;
-  status: string;
-  delay_min: number;
-  risk: "LOW" | "MEDIUM" | "HIGH";
-  message: string;
-  eta_min: number | null;
-};
+/** eta_min is nullable on the wire; this card only reads the delay fields. */
+type Nudge = Omit<OrderNudge, "eta_min"> & { eta_min: number | null };
 
 export default function RestaurantOrdersPage() {
   const [orders, setOrders] = useState<RestaurantOrder[]>([]);
@@ -41,18 +35,31 @@ export default function RestaurantOrdersPage() {
     load();
   }, [load]);
 
-  // Fetch AI delay-prediction nudges for in-flight orders.
+  // Fetch AI delay-prediction nudges for in-flight orders, as one batch.
+  // This issued a request per in-flight order on every load.
   useEffect(() => {
-    if (orders.length === 0) return;
     const relevant = orders.filter((o) =>
       ["CONFIRMED", "PREPARING", "OUT_FOR_DELIVERY"].includes(o.status)
     );
-    relevant.forEach((o) => {
-      ordersApi
-        .nudge(o.id)
-        .then((n) => setNudges((prev) => ({ ...prev, [o.id]: n })))
-        .catch(() => undefined);
-    });
+    if (relevant.length === 0) {
+      setNudges({});
+      return;
+    }
+    let cancelled = false;
+    ordersApi
+      .nudges(relevant.map((o) => o.id))
+      .then((body) => {
+        if (cancelled) return;
+        // Replace, not merge: an order that left the in-flight set must lose
+        // its banner instead of keeping one that no longer applies.
+        const next: Record<number, Nudge> = {};
+        for (const n of body.nudges) next[n.order_id] = n;
+        setNudges(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [orders]);
 
   async function assignDriver(orderId: number) {
