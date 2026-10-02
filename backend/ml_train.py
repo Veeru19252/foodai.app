@@ -31,18 +31,32 @@ CORPUS_PATH = ROOT / "data" / "orders.csv"
 sys.path.insert(0, str(ROOT / "scripts"))
 import train_forecast as trainer  # noqa: E402
 
+from collections import namedtuple
+
 from backend.db import SessionLocal  # noqa: E402
-from backend.models import Order  # noqa: E402
+from backend.models import Order, Restaurant  # noqa: E402
 from backend.tracking_state import restaurant_start  # noqa: E402
 
+# The five columns live_orders_frame actually reads. Selecting columns instead
+# of whole entities matters here: this scans the entire orders table on every
+# retrain, and each row contributes five scalars.
+_OrderPoint = namedtuple(
+    "_OrderPoint", "id restaurant_id created_at delivery_lat delivery_lng"
+)
 
-def _zone_for_order(order) -> Optional[str]:
+
+def _zone_for_order(order, restaurant_point=None) -> Optional[str]:
     """Assign a delivery zone: the order's delivery point if known, else its
-    restaurant's zone, else None (order is skipped)."""
+    restaurant's zone, else None (order is skipped).
+
+    ``restaurant_point`` is the restaurant's coordinates when the caller already
+    has them, which keeps the whole-table scan below from lazy-loading
+    ``order.restaurant`` once per order.
+    """
     if order.delivery_lat is not None and order.delivery_lng is not None:
         return eta_service.nearest_zone(order.delivery_lat, order.delivery_lng)
     try:
-        lat, lng = restaurant_start(order)
+        lat, lng = restaurant_start(order, restaurant_point)
         return eta_service.nearest_zone(lat, lng)
     except ValueError:
         return None
@@ -53,22 +67,38 @@ def live_orders_frame() -> pd.DataFrame:
     rows = []
     db = SessionLocal()
     try:
-        orders = db.query(Order).all()
-        for o in orders:
-            if o.created_at is None:
+        # One query for every restaurant with coordinates. Orders without a
+        # delivery point fall back to their restaurant's zone, and leaving that
+        # relationship lazy cost one SELECT per such order.
+        restaurant_points = {
+            rid: (lat, lng)
+            for rid, lat, lng in db.query(Restaurant.id, Restaurant.lat, Restaurant.lng).filter(
+                Restaurant.lat.isnot(None), Restaurant.lng.isnot(None)
+            )
+        }
+        orders = db.query(
+            Order.id,
+            Order.restaurant_id,
+            Order.created_at,
+            Order.delivery_lat,
+            Order.delivery_lng,
+        ).all()
+        for order_id, restaurant_id, created_at, delivery_lat, delivery_lng in orders:
+            order = _OrderPoint(order_id, restaurant_id, created_at, delivery_lat, delivery_lng)
+            if order.created_at is None:
                 continue
-            zone = _zone_for_order(o)
+            zone = _zone_for_order(order, restaurant_points.get(order.restaurant_id))
             if zone is None:
                 continue
             rows.append(
                 {
-                    "order_id": o.id,
-                    "restaurant_id": o.restaurant_id,
+                    "order_id": order.id,
+                    "restaurant_id": order.restaurant_id,
                     "customer_zone": zone,
                     "distance_km": 0.0,
-                    "hour": o.created_at.hour,
-                    "day_of_week": o.created_at.weekday(),
-                    "is_weekend": 1 if o.created_at.weekday() in (5, 6) else 0,
+                    "hour": order.created_at.hour,
+                    "day_of_week": order.created_at.weekday(),
+                    "is_weekend": 1 if order.created_at.weekday() in (5, 6) else 0,
                     "prep_time_min": 0.0,
                     "traffic_factor": 1.0,
                     "delivery_min": 0.0,
