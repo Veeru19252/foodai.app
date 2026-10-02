@@ -366,3 +366,34 @@ def test_restaurant_start_falls_back_when_the_row_has_no_coordinates():
     order = FakeOrder(restaurant=Rest(), restaurant_id=1)
     expected = tracking.restaurant_coordinates(1)
     assert ts.restaurant_start(order) == expected
+
+
+def test_resolve_restaurant_point_uses_the_selected_pair():
+    """A pair the caller already selected is used as-is."""
+    assert ts.resolve_restaurant_point(999, (18.33, 73.9)) == (18.33, 73.9)
+
+
+def test_resolve_restaurant_point_falls_back_to_the_legacy_dict():
+    """With no pair, the pure COORDINATES dict is next."""
+    assert ts.resolve_restaurant_point(1) == tracking.restaurant_coordinates(1)
+
+
+def test_resolve_restaurant_point_ends_at_the_demo_home():
+    """An id nothing knows must land on the demo home, not raise.
+
+    Raising here is not harmless: callers that catch ValueError substitute a
+    flat 1 km, so the demo home is what keeps a coordinate-less restaurant's
+    distance coming from a real position.
+    """
+    assert ts.resolve_restaurant_point(999999) == tracking.DEFAULT_CUSTOMER_HOME
+
+
+def test_restaurant_start_ends_at_the_demo_home_when_nothing_knows_the_id():
+    """The full descent: a NULL row, then a dict miss, then the demo home."""
+
+    class Rest:
+        lat = None
+        lng = None
+
+    order = FakeOrder(restaurant=Rest(), restaurant_id=999999)
+    assert ts.restaurant_start(order) == tracking.DEFAULT_CUSTOMER_HOME

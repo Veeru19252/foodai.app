@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from backend.db import SessionLocal
 from backend.models import Delivery, Order, Restaurant, User
 from backend.routers import orders as orders_router
+from backend.routers.orders import MAX_EARNINGS_DISTANCE_KM
 
 
 class CustomerUser:
@@ -357,3 +358,141 @@ def test_restaurant_orders_still_reports_customer_and_driver(distinct_customers)
         assert row["customer_name"].startswith("NC"), row
         assert str(row["assigned_driver_name"]).startswith("ND"), row
         assert row["assigned_driver_id"] is not None, row
+
+
+@pytest.fixture
+def driver_history_without_coords():
+    """Same shape as ``driver_history``, but no restaurant has coordinates.
+
+    ``RestaurantCreate`` and POST /admin/restaurants never set lat/lng, so every
+    restaurant created at runtime looks like this. The earnings query joins the
+    restaurant row and selects its coordinates, so a NULL here is authoritative --
+    and the lazy ``order.restaurant`` load it used to fall back on could only
+    ever read those same NULLs, at one query per delivery.
+    """
+    db = SessionLocal()
+    driver = User(
+        email="nocoord_drv@example.com", name="NOCoordDrv", password_hash="x", role="delivery"
+    )
+    db.add(driver)
+    db.flush()
+    n = 20
+    customers, restaurants = [], []
+    for i in range(n):
+        c = User(
+            email=f"nocoord_dc{i}@example.com",
+            name=f"NOCO{i}",
+            password_hash="x",
+            role="customer",
+        )
+        db.add(c)
+        customers.append(c)
+    db.flush()
+    for i in range(n):
+        r = Restaurant(
+            user_id=driver.id,
+            name=f"NOCoord Diner {i}",
+            address="a",
+            cuisine="test",
+            lat=None,
+            lng=None,
+        )
+        db.add(r)
+        restaurants.append(r)
+    db.flush()
+    orders = []
+    for i in range(n):
+        o = Order(
+            customer_id=customers[i].id,
+            restaurant_id=restaurants[i].id,
+            status="DELIVERED",
+            total=10.0 + i,
+            delivery_address="somewhere",
+            delivery_city="Chennai",
+            delivery_lat=13.05,
+            delivery_lng=80.02,
+        )
+        db.add(o)
+        orders.append(o)
+    db.flush()
+    now = datetime(2026, 10, 1, 12, 0, 0)
+    for o in orders:
+        db.add(Delivery(order_id=o.id, driver_id=driver.id, delivered_time=now))
+    db.commit()
+    yield db, n, driver.id
+    # Not wrapped in a bare except on purpose: these rows carry a non-Argon2id
+    # password_hash, and a silently failed cleanup leaves them behind for
+    # test_seeded_passwords_are_argon2id to trip over later in the run.
+    try:
+        order_ids = [o.id for o in orders]
+        db.query(Delivery).filter(Delivery.order_id.in_(order_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Order).filter(Order.id.in_(order_ids)).delete(synchronize_session=False)
+        db.query(Restaurant).filter(Restaurant.name.like("NOCoord %")).delete(
+            synchronize_session=False
+        )
+        db.query(User).filter(User.email.like("nocoord_%")).delete(
+            synchronize_session=False
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_driver_earnings_does_not_query_restaurants_per_coordinate_less_delivery(
+    driver_history_without_coords,
+):
+    """A restaurant with no coordinates must not cost a query per delivery.
+
+    The earnings query already selects Restaurant.lat/lng, so the only missing
+    piece was resolving the legacy tracking fallback from the id instead of
+    re-reading the row the join had just read.
+    """
+    db, n, driver_id = driver_history_without_coords
+    queries = _count_queries(
+        db, lambda: orders_router.driver_earnings(DriverUser(driver_id), db)
+    )
+    assert queries <= 2, (
+        f"driver_earnings issued {queries} queries for {n} deliveries at "
+        "coordinate-less restaurants; the restaurant row is already joined, so "
+        "the fallback must be resolved from the id"
+    )
+
+
+def test_driver_earnings_still_pays_out_for_coordinate_less_deliveries(
+    driver_history_without_coords,
+):
+    """The fallback is what decides the distance, so it must still resolve.
+
+    With no coordinates anywhere, tracking's legacy COORDINATES dict misses these
+    restaurant ids and restaurant_start lands on the demo home. That is a real
+    position, so the route distance resolves and gets clamped -- it is not the
+    hardcoded 1.0 km the handler substitutes when the resolver raises. Every
+    delivery resolves to the same demo home, so they must all agree.
+    """
+    db, n, driver_id = driver_history_without_coords
+    result = orders_router.driver_earnings(DriverUser(driver_id), db)
+
+    assert result["total_deliveries"] == n
+    assert result["completed_deliveries"] == n
+    assert result["total_earnings"] > 0
+    assert result["per_delivery_rate"] > 0
+    recent = result["recent"]
+    assert len(recent) == 10
+    distances = {row["distance_km"] for row in recent}
+    assert len(distances) == 1, f"deliveries disagree on distance: {distances}"
+    distance = distances.pop()
+    assert distance > 1.0, (
+        f"distance {distance} is the 1.0 km stand-in for a resolver that raised; "
+        "a coordinate-less restaurant must still resolve via the demo home"
+    )
+    assert distance <= MAX_EARNINGS_DISTANCE_KM
+    for row in recent:
+        assert row["distance_km"] >= 1.0, (
+            f"delivery {row['delivery_id']} got distance {row['distance_km']}, "
+            "below the floor"
+        )
+        assert row["earned"] > 0, f"delivery {row['delivery_id']} earned nothing"
+        assert row["restaurant_name"].startswith("NOCoord Diner ")
+        assert row["customer_name"].startswith("NOCO")

@@ -46,6 +46,7 @@ from backend.schemas import (
 from backend.simulation import publish_sync
 from backend.security import get_current_user
 from backend.tracking_state import (
+    resolve_restaurant_point,
     eta_for_order,
     order_route,
     progress_at_position,
@@ -381,8 +382,18 @@ def driver_earnings(
         if order is None:
             continue
         try:
+            # The query above already joined the restaurant row, so a NULL here
+            # is authoritative and restaurant_start's lazy order.restaurant load
+            # could only read those same NULLs. Resolving the legacy fallback
+            # from the id keeps a delivery at a coordinate-less restaurant from
+            # costing a SELECT of its own.
             distance_km = _route_distance_km(
-                (rest_lat, rest_lng) if rest_lat is not None and rest_lng is not None else None,
+                resolve_restaurant_point(
+                    order.restaurant_id,
+                    (rest_lat, rest_lng)
+                    if rest_lat is not None and rest_lng is not None
+                    else None,
+                ),
                 order,
             )
         except ValueError:

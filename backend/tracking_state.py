@@ -26,6 +26,28 @@ def delivery_end(order: Order) -> Tuple[float, float]:
     return tracking.DEFAULT_CUSTOMER_HOME
 
 
+def resolve_restaurant_point(
+    restaurant_id: int, known: Optional[Tuple[float, float]] = None
+) -> Tuple[float, float]:
+    """Restaurant coordinates from a pair the caller has already selected.
+
+    ``known`` comes from a query that already joined the restaurant row, which
+    makes a NULL there authoritative: the lazy ``order.restaurant`` load that
+    :func:`restaurant_start` would do could only ever read those same NULLs.
+    Skipping it is what lets a caller that selected the coordinates stop paying
+    a SELECT per row.
+
+    Falls back to the pure tracking.COORDINATES dict, then the demo home, which
+    is the same descent :func:`restaurant_start` performs.
+    """
+    if known is not None:
+        return known
+    try:
+        return tracking.restaurant_coordinates(restaurant_id)
+    except ValueError:
+        return tracking.DEFAULT_CUSTOMER_HOME
+
+
 def restaurant_start(
     order: Order, restaurant_point: Optional[Tuple[float, float]] = None
 ) -> Tuple[float, float]:
@@ -44,12 +66,10 @@ def restaurant_start(
     if restaurant_point is not None:
         return restaurant_point
     restaurant = getattr(order, "restaurant", None)
+    known = None
     if restaurant is not None and restaurant.lat is not None and restaurant.lng is not None:
-        return (restaurant.lat, restaurant.lng)
-    try:
-        return tracking.restaurant_coordinates(order.restaurant_id)
-    except ValueError:
-        return tracking.DEFAULT_CUSTOMER_HOME
+        known = (restaurant.lat, restaurant.lng)
+    return resolve_restaurant_point(order.restaurant_id, known)
 
 
 def order_route(
