@@ -15,8 +15,22 @@
 # than running with development defaults (demo seeding, OTP codes in responses,
 # the public default JWT secret).
 #
-# Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in the Render dashboard to enable
-# real checkout; with them absent the backend will not boot in production.
+# Payments on a public deploy: CASH ON DELIVERY ONLY. Set RAZORPAY_KEY_ID and
+# RAZORPAY_KEY_SECRET in the Render dashboard because the backend's production
+# guard refuses to boot without them -- it checks only that they are present.
+#
+# Supplying them does NOT enable Razorpay checkout, and the checkout UI says so:
+# backend/routers/payments.py mints razorpay_order_id itself and never calls
+# Razorpay's Orders API, so with test mode off the intent comes back
+# test_mode: false and the frontend raises "Razorpay live mode is not configured
+# in this build" (frontend/src/app/checkout/page.tsx).
+#
+# PAYMENTS_TEST_MODE stays off on purpose. Turning it on would select the demo
+# secret, which is hardcoded in that same frontend file and therefore public --
+# anyone reading the JS bundle could forge a payment signature for any order.
+# A loud failure beats a silent fraud hole on a public URL. Making Razorpay work
+# publicly means building the Orders API call and webhook verification, which is
+# a code change rather than a configuration one.
 
 databases:
   - name: foodai-db
@@ -51,9 +65,9 @@ services:
         generateValue: true
       - key: PYTHON_VERSION
         value: "3.9"
-      # Real checkout needs merchant keys. Until they exist, the backend's own
-      # production guard refuses to boot rather than falling back to the public
-      # demo Razorpay secret, so PAYMENTS_TEST_MODE is left off deliberately.
+      # Required to boot in production; the guard tests presence only. They do
+      # not buy a working Razorpay checkout -- see the Payments note at the top.
+      # Any non-empty value passes, and the real keys are used nowhere.
       - key: RAZORPAY_KEY_ID
         sync: false
       - key: RAZORPAY_KEY_SECRET
