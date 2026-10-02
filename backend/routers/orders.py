@@ -553,7 +553,11 @@ def _create_single_order(
         promo.times_used += 1
     if commit:
         db.commit()
-    db.refresh(order)
+        # Only needed after a commit, which expires the instance. Every caller
+        # that passes commit=False either refreshes for itself or serializes a
+        # re-read copy, so refreshing here too cost one SELECT per group in the
+        # batch checkout for nothing.
+        db.refresh(order)
     return order
 
 
@@ -647,28 +651,48 @@ def create_orders_batch(
         # longer commits, so this rollback is what makes the batch atomic.
         db.rollback()
         raise
+    # Capture what the notification needs while the instances are still loaded.
+    # commit() expires them, so reading order.id/order.total/order.restaurant
+    # afterwards cost a row refresh plus a restaurant SELECT for every group.
+    notify_targets = [(o.id, o.total, o.restaurant_id) for o in orders]
+    restaurant_ids = {rid for _oid, _total, rid in notify_targets if rid is not None}
+    # One query for every group's restaurant owner, instead of a lazy
+    # order.restaurant per group.
+    owner_by_restaurant = dict(
+        db.query(Restaurant.id, Restaurant.user_id).filter(
+            Restaurant.id.in_(restaurant_ids)
+        )
+    ) if restaurant_ids else {}
     if key is not None:
         db.commit()
         for order in orders:
             db.refresh(order)
     else:
         db.commit()
-    for order in orders:
-        if order.restaurant is not None and order.restaurant.user_id:
+    for order_id, total, restaurant_id in notify_targets:
+        owner_id = owner_by_restaurant.get(restaurant_id)
+        if owner_id:
             notify(
                 db,
-                order.restaurant.user_id,
+                owner_id,
                 "new_order",
                 "New order received",
-                f"Order #{order.id} from {user.name} — ₹{order.total:.0f}",
-                order.id,
+                f"Order #{order_id} from {user.name} — ₹{total:.0f}",
+                order_id,
             )
     # Re-read the whole cart in one query with the serializer relationships
     # loaded, rather than serializing each just-inserted instance, whose
     # relationships are still lazy: that issued a SELECT per line item per
-    # group on top of the order itself.
+    # group on top of the order itself. The ids come from notify_targets because
+    # notify() commits, which expires the instances, so reading order.id here
+    # would refresh one row per group.
     return BatchOrderResponse(
-        orders=[_order_detail(o) for o in _reload_all_for_detail(db, [o.id for o in orders])]
+        orders=[
+            _order_detail(o)
+            for o in _reload_all_for_detail(
+                db, [oid for oid, _total, _rid in notify_targets]
+            )
+        ]
     )
 
 
