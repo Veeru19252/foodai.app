@@ -81,14 +81,23 @@ def _promo_payload(promo: PromoCode) -> dict:
 
 
 def validate_promo_code(
-    db: Session, code: str, order_total: float, restaurant_id: Optional[int] = None
+    db: Session,
+    code: str,
+    order_total: float,
+    restaurant_id: Optional[int] = None,
+    promo: Optional[PromoCode] = None,
 ):
     """Return (ok, message, promo_or_None), mirroring database.py semantics.
 
     Restaurant-scoped promos (``restaurant_id`` set) only apply to that
     restaurant; platform-wide promos (``restaurant_id`` NULL) apply anywhere.
+
+    ``promo`` is the row when the caller has already selected it, so a cart
+    naming the same code in several groups does not re-query it per group.
+    Every rule below still runs; only the lookup is skipped.
     """
-    promo = db.query(PromoCode).filter(PromoCode.code == code).first()
+    if promo is None:
+        promo = db.query(PromoCode).filter(PromoCode.code == code).first()
     if promo is None:
         return False, "Invalid promo code.", None
     if not promo.active:
@@ -459,12 +468,21 @@ def _require_pre_order_verification(payload: CreateOrderRequest) -> None:
         )
 
 
+# Sentinel for "the caller did not preload this", so a legitimately absent
+# preloaded value (a promo row that does not exist) is still distinguishable
+# from "look it up yourself".
+_NOT_PRELOADED = object()
+
+
 def _create_single_order(
     db: Session,
     user: User,
     payload: CreateOrderRequest,
     apply_delivery_fee: bool = True,
     commit: bool = True,
+    restaurant=_NOT_PRELOADED,
+    menu_items=_NOT_PRELOADED,
+    promo_row=_NOT_PRELOADED,
 ) -> Order:
     """Create one order for a restaurant group (shared by single + batch).
 
@@ -476,18 +494,27 @@ def _create_single_order(
     all-or-nothing (the batch endpoint, and creation under an idempotency
     key). Committing per group meant a failure on the third of four
     restaurant groups left the first two orders live and charged.
+
+    ``restaurant``, ``menu_items`` and ``promo_row`` let a caller placing several
+    groups supply what it has already selected. The batch endpoint does, because
+    a group count nothing bounds used to cost a restaurant query, a whole menu
+    query and a promo query per group. Passing them changes no rule: the
+    item-not-on-this-menu check is a membership test on the group's own slice
+    either way.
     """
-    restaurant = db.query(Restaurant).filter(Restaurant.id == payload.restaurant_id).first()
+    if restaurant is _NOT_PRELOADED:
+        restaurant = db.query(Restaurant).filter(Restaurant.id == payload.restaurant_id).first()
     if restaurant is None:
         raise HTTPException(status_code=404, detail="Restaurant not found.")
 
     _require_pre_order_verification(payload)
 
     # Resolve prices server-side; reject items that aren't on this menu.
-    menu_items = {
-        mi.id: mi
-        for mi in db.query(MenuItem).filter(MenuItem.restaurant_id == payload.restaurant_id).all()
-    }
+    if menu_items is _NOT_PRELOADED:
+        menu_items = {
+            mi.id: mi
+            for mi in db.query(MenuItem).filter(MenuItem.restaurant_id == payload.restaurant_id).all()
+        }
     for line in payload.items:
         if line.menu_item_id not in menu_items:
             raise HTTPException(status_code=400, detail=f"Menu item {line.menu_item_id} is not on this restaurant's menu.")
@@ -498,7 +525,11 @@ def _create_single_order(
     promo = None
     if payload.coupon_code:
         ok, message, promo = validate_promo_code(
-            db, payload.coupon_code, subtotal, payload.restaurant_id
+            db,
+            payload.coupon_code,
+            subtotal,
+            payload.restaurant_id,
+            promo=None if promo_row is _NOT_PRELOADED else promo_row,
         )
         if not ok:
             raise HTTPException(status_code=400, detail=message)
@@ -647,9 +678,48 @@ def create_orders_batch(
             return BatchOrderResponse(orders=[_order_detail(o) for o in replayed])
 
     try:
+        # Every group's restaurant, menu and promo selected up front: this loop
+        # used to cost three queries per restaurant group, and the group count is
+        # client-controlled because BatchOrderRequest.orders has no max_length.
+        # Only the menu items the cart actually names are loaded, where the
+        # per-group query pulled each restaurant's entire menu.
+        group_ids = {req.restaurant_id for req in payload.orders}
+        restaurants_by_id = {
+            r.id: r
+            for r in db.query(Restaurant).filter(Restaurant.id.in_(group_ids))
+        }
+        named_items = {
+            (req.restaurant_id, line.menu_item_id)
+            for req in payload.orders
+            for line in req.items
+        }
+        # Sliced per restaurant, so naming another group's dish stays a
+        # membership miss: the check inside _create_single_order is a lookup in
+        # this restaurant's slice only. The id filter above already limits the
+        # result to items the cart names.
+        menus_by_restaurant: dict = {}
+        for mi in db.query(MenuItem).filter(
+            MenuItem.id.in_({mid for _rid, mid in named_items})
+        ):
+            menus_by_restaurant.setdefault(mi.restaurant_id, {})[mi.id] = mi
+        promos_by_code = {}
+        for code in {req.coupon_code for req in payload.orders if req.coupon_code}:
+            row = db.query(PromoCode).filter(PromoCode.code == code).first()
+            # A code that resolves to nothing stays absent so the per-group
+            # check still reports it as invalid rather than silently skipping it.
+            if row is not None:
+                promos_by_code[code] = row
+
         orders = [
             _create_single_order(
-                db, user, req, apply_delivery_fee=(idx == 0), commit=False
+                db,
+                user,
+                req,
+                apply_delivery_fee=(idx == 0),
+                commit=False,
+                restaurant=restaurants_by_id.get(req.restaurant_id),
+                menu_items=menus_by_restaurant.get(req.restaurant_id, {}),
+                promo_row=promos_by_code.get(req.coupon_code, _NOT_PRELOADED),
             )
             for idx, req in enumerate(payload.orders)
         ]

@@ -18,6 +18,7 @@ rather than an absolute count, which would just bake in today's internals.
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
@@ -172,13 +173,14 @@ def _run_batch(customer_id: int, spec, idempotency_key=None):
     return statements, response
 
 
-def test_notification_loop_adds_no_per_group_restaurant_read(cart_db):
-    """Doubling the cart must not double the restaurant reads.
+def test_cart_size_does_not_change_the_restaurant_read_count(cart_db):
+    """Doubling the cart must not add a single restaurant read.
 
-    Two carts, twice the size. The only per-group restaurant read left is the
-    one inside _create_single_order, so the difference must equal the number of
-    extra groups. Reading order.restaurant in the notify loop would make it
-    twice that.
+    Two carts, twice the size. Both places that used to read a restaurant per
+    group are now batched -- the group preload that validates each restaurant
+    exists, and the owner map the notification loop consults -- so the count has
+    to be identical. Reading order.restaurant in either loop puts a per-group
+    read back and fails here.
     """
     small_id, small = _build(cart_db, "s", 4)
     large_id, large = _build(cart_db, "l", 8)
@@ -190,13 +192,12 @@ def test_notification_loop_adds_no_per_group_restaurant_read(cart_db):
     assert len(large_response.orders) == 8
 
     reads = lambda sql: [s for s in sql if "FROM restaurants" in s]
-    extra_groups = len(large) - len(small)
-    assert len(reads(large_sql)) - len(reads(small_sql)) == extra_groups, (
-        f"going from {len(small)} to {len(large)} groups added "
-        f"{len(reads(large_sql)) - len(reads(small_sql))} restaurant reads; "
-        f"expected {extra_groups} (one per group inside _create_single_order). "
-        "A second per-group read means the notify loop is lazy-loading "
-        "order.restaurant again."
+    small_reads, large_reads = len(reads(small_sql)), len(reads(large_sql))
+    assert small_reads == large_reads, (
+        f"going from {len(small)} to {len(large)} groups changed the restaurant "
+        f"read count from {small_reads} to {large_reads}. Both the group "
+        "preload and the notification owner map are batched, so neither may "
+        "grow with the cart."
     )
 
 
@@ -217,6 +218,39 @@ def test_batch_checkout_notifies_every_restaurant_owner(cart_db):
             f"restaurant owner {owner_id} got {len(matching)} new_order "
             "notifications for this cart; expected exactly 1"
         )
+
+
+def test_cart_rejects_a_menu_item_belonging_to_another_restaurant(cart_db):
+    """Batching the menus must not widen what counts as a group's own menu.
+
+    The preloaded slice is keyed by (restaurant_id, menu_item_id), so naming
+    another group's dish is a membership miss. Keying the preload by item id
+    alone would quietly accept it and price the wrong food, which is why this
+    pins the cross-restaurant case rather than a missing item.
+    """
+    customer_id, spec = _build(cart_db, "x", 2)
+    other_restaurant_id = spec[1][0]
+    borrowed_item_id = spec[1][2]
+    assert other_restaurant_id != spec[0][0]
+
+    # Group 0 asks for group 1's dish. The item id is real and the query for it
+    # succeeds, so only the per-restaurant scoping can reject this.
+    with pytest.raises(HTTPException) as excinfo:
+        _run_batch(
+            customer_id,
+            [
+                (spec[0][0], spec[0][1], borrowed_item_id),
+                (spec[1][0], spec[1][1], spec[1][2]),
+            ],
+        )
+    assert excinfo.value.status_code == 400
+    assert "not on this restaurant's menu" in excinfo.value.detail
+
+    # The sibling group must not have survived the failure.
+    cart_db.rollback()
+    assert (
+        cart_db.query(Order).filter(Order.customer_id == customer_id).count() == 0
+    ), "a rejected group must roll back the whole cart"
 
 
 def test_batch_checkout_does_not_reread_orders_after_notifying(cart_db):
