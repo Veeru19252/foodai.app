@@ -81,7 +81,22 @@ export async function api<T>(
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+  // Without this the browser's rejection surfaces as a bare
+  // "TypeError: fetch failed", which looks like an auth problem but means the
+  // request never got a response: the backend is down, or its origin is not
+  // in CORS_ORIGINS. Both are common on a laptop (a second `next dev` silently
+  // binds the next port, which CORS then rejects), and the raw message says
+  // nothing about any of it.
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, { ...options, headers });
+  } catch {
+    throw new ApiError(
+      0,
+      `Cannot reach the FoodAI API at ${API_URL}. The backend may be down, ` +
+        `or this page's origin may not be in the backend's CORS_ORIGINS.`
+    );
+  }
 
   if (res.status === 401 && retry) {
     const refreshed = await tryRefresh();
